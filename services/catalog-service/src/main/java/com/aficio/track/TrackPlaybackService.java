@@ -1062,11 +1062,14 @@ public class TrackPlaybackService {
         String cleanedVideo = cleanVideoTitle(videoTitle, artistName);
         String normVideo = normalizeTitle(videoTitle);
 
-        if (normTrack.isEmpty() || normVideo.isEmpty()) return false;
+        if (normTrack.isBlank() || normVideo.isBlank()) return false;
 
-        // Direct containment
-        if (cleanedVideo.contains(normTrack) || normTrack.contains(cleanedVideo)) return true;
-        if (normVideo.contains(normTrack)) return true;
+        // Direct containment (only check cleanedVideo if it has non-blank substantive content)
+        if (!cleanedVideo.isBlank()) {
+            if (cleanedVideo.contains(normTrack)) return true;
+            if (cleanedVideo.length() >= 3 && normTrack.contains(cleanedVideo)) return true;
+        }
+        if (!normTrack.isBlank() && normVideo.contains(normTrack)) return true;
 
         // Non-trivial word overlap
         String[] words = normTrack.split(" ");

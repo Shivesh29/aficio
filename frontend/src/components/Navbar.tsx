@@ -57,25 +57,26 @@ export const Navbar = () => {
 
         {/* Primary Navigation */}
         <nav className="navbar-links">
-          <Link to="/" className={`nav-link ${isActive('/') ? 'active' : ''}`}>
-            Catalog
+          <Link to="/" className={`nav-link ${isActive('/') ? 'active' : ''}`} title="Catalog">
+            <Disc3 size={15} />
+            <span>Catalog</span>
           </Link>
-          <Link to="/lists" className={`nav-link ${isActive('/lists') ? 'active' : ''}`}>
+          <Link to="/lists" className={`nav-link ${isActive('/lists') ? 'active' : ''}`} title="Collections">
             <Bookmark size={15} />
-            Collections
+            <span>Collections</span>
           </Link>
-          <Link to="/search" className={`nav-link ${isActive('/search') ? 'active' : ''}`}>
+          <Link to="/search" className={`nav-link ${isActive('/search') ? 'active' : ''}`} title="Discover & Import">
             <Search size={15} />
-            Discover & Import
+            <span>Discover</span>
           </Link>
           {isAuthenticated && (
-            <Link to="/feed" className={`nav-link ${isActive('/feed') ? 'active' : ''}`}>
+            <Link to="/feed" className={`nav-link ${isActive('/feed') ? 'active' : ''}`} title="Feed">
               <Activity size={15} />
-              Feed
+              <span>Feed</span>
             </Link>
           )}
           {isAuthenticated && (
-            <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`}>
+            <Link to="/messages" className={`nav-link ${isActive('/messages') ? 'active' : ''}`} title="Messages">
               <MessageSquare size={15} />
               <span>Messages</span>
               {unreadDmCount > 0 && (

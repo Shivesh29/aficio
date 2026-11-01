@@ -7,6 +7,7 @@ import {
   Send,
   Loader2,
   ArrowRight,
+  ArrowLeft,
   User,
   AlertCircle,
   UserX,
@@ -344,7 +345,7 @@ export const MessagesPage = () => {
 
   return (
     <div className="messages-page">
-      <div className="messages-shell">
+      <div className={`messages-shell ${activeRecipient ? 'has-active-chat' : ''}`}>
         <aside className="messages-sidebar">
           <div className="sidebar-header">
             <h3>
@@ -473,6 +474,19 @@ export const MessagesPage = () => {
             <>
               <div className="chat-header">
                 <div className="chat-header-user">
+                  <button
+                    type="button"
+                    className="chat-mobile-back-btn"
+                    onClick={() => {
+                      setSearchParams({});
+                      setRecipientInput('');
+                      setRecipientStatus(null);
+                    }}
+                    title="Back to conversations"
+                    aria-label="Back to conversations"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
                   <span className="user-avatar-sm">
                     {activeRecipient.charAt(0).toUpperCase()}
                   </span>

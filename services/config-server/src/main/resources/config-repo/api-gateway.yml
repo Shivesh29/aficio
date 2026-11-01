@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# API GATEWAY — gateway-specific configuration supplements.
+# Base config is in the gateway's own application.yml.
+# This file is served by Config Server to the gateway at startup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Override the allowed origins from config server for the gateway's CORS config.
+# In production set AFICIO_CORS_ALLOWED_ORIGINS to the real frontend domain.
+aficio:
+  cors:
+    allowed-origins: ${AFICIO_CORS_ALLOWED_ORIGINS:http://localhost:*,http://localhost:5174,http://localhost:5173,http://localhost:3000}
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    com.aficio.gateway: DEBUG
+    reactor.netty.http.client: WARN

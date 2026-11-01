@@ -1,0 +1,68 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 5000
+        pool:
+          type: ELASTIC
+          max-idle-time: 5s
+      discovery:
+        locator:
+          enabled: false
+      routes:
+        - id: auth-service
+          uri: ${AFICIO_AUTH_SERVICE_URL:http://auth-service:8081}
+          predicates:
+            - Path=/users, /users/**, /auth, /auth/**
+          filters:
+            - StripPrefix=0
+
+        - id: catalog-service
+          uri: ${AFICIO_CATALOG_SERVICE_URL:http://catalog-service:8082}
+          predicates:
+            - Path=/albums, /albums/**, /artists, /artists/**, /tracks, /tracks/**, /catalog, /catalog/**, /musicbrainz, /musicbrainz/**
+          filters:
+            - StripPrefix=0
+
+        - id: social-service
+          uri: ${AFICIO_SOCIAL_SERVICE_URL:http://social-service:8083}
+          predicates:
+            - Path=/api/reviews, /api/reviews/**, /api/lists, /api/lists/**, /api/users, /api/users/**, /api/messages, /api/messages/**, /app/dm.send, /api/notifications, /api/notifications/**, /api/feed, /api/feed/**
+          filters:
+            - StripPrefix=0
+
+        - id: social-websocket
+          uri: ${AFICIO_SOCIAL_WS_URL:ws://social-service:8083}
+          predicates:
+            - Path=/social-ws, /social-ws/**, /notification-ws, /notification-ws/**
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: ${AFICIO_CORS_ALLOWED_ORIGINS:http://localhost:*,http://localhost:5174,http://localhost:5173,http://localhost:3000}
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+              - HEAD
+            allowedHeaders: "*"
+            allowCredentials: true
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    com.aficio.gateway: DEBUG
+    reactor.netty.http.client: WARN

@@ -1,0 +1,40 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: catalog-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/catalog_db}
+    username: ${SPRING_DATASOURCE_USERNAME:aficio_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:aficio_password}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
+    schemas: public
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+aficio:
+  redis:
+    enabled: ${AFICIO_REDIS_ENABLED:true}
+  musicbrainz:
+    user-agent: AficioMusic/1.0.0 (https://github.com/aficio/aficio)
+  youtube:
+    api-key: ${YOUTUBE_API_KEY:}
+    album-sync-limit: ${AFICIO_YOUTUBE_ALBUM_SYNC_LIMIT:4}
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-production-to-a-long-random-string}
+  cors:
+    allowed-origins: ${AFICIO_CORS_ALLOWED_ORIGINS:http://localhost:*,http://localhost:5174,http://localhost:5173,http://localhost:3000}

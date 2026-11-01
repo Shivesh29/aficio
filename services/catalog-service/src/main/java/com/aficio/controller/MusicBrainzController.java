@@ -1,0 +1,66 @@
+package com.aficio.controller;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.aficio.musicbrainz.MusicBrainzArtist;
+import com.aficio.musicbrainz.MusicBrainzClient;
+import com.aficio.musicbrainz.MusicBrainzRecordingSearchResponse;
+import com.aficio.musicbrainz.MusicBrainzReleaseSearchResponse;
+import com.aficio.musicbrainz.MusicBrainzSearchResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+public class MusicBrainzController {
+
+    private final MusicBrainzClient musicBrainzClient;
+    private static final Logger log = LoggerFactory.getLogger(MusicBrainzController.class);
+
+    public MusicBrainzController(MusicBrainzClient musicBrainzClient) {
+        this.musicBrainzClient = musicBrainzClient;
+    }
+
+    @GetMapping("/musicbrainz/artists")
+    public MusicBrainzSearchResponse searchArtists(
+            @RequestParam String name
+    ) {
+        return musicBrainzClient.searchArtists(name);
+    }
+
+    @GetMapping("/musicbrainz/artists/{artistId}/releases")
+    public MusicBrainzReleaseSearchResponse getArtistReleases(
+            @PathVariable String artistId
+    ) {
+        return musicBrainzClient.getArtistReleases(artistId);
+    }
+
+    @GetMapping("/musicbrainz/artists/{artistId}")
+    public MusicBrainzArtist getArtistDetails(
+            @PathVariable String artistId
+    ) {
+        return musicBrainzClient.getArtistDetails(artistId);
+    }
+
+    @GetMapping("/musicbrainz/search")
+    public Object unifiedSearch(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "album") String type
+    ) {
+        return switch (type.toLowerCase()) {
+            case "artist" -> musicBrainzClient.searchArtists(query);
+            case "artist-releases" -> musicBrainzClient.getArtistReleases(query);
+            case "album" -> musicBrainzClient.searchReleases(query);
+            case "track" -> musicBrainzClient.searchRecordings(query);
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unsupported search type. Use artist, album, track, or artist-releases.");
+        };
+    }
+}

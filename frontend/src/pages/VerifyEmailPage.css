@@ -1,0 +1,44 @@
+.verify-email-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(100vh - 200px);
+  padding: 2rem;
+}
+
+.verify-email-container {
+  background-color: var(--aficio-surface);
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.verify-email-container h2 {
+  margin-bottom: 1.5rem;
+  color: var(--aficio-primary);
+}
+
+.verify-loading p {
+  color: var(--aficio-text-secondary);
+}
+
+.success-message {
+  color: #4ade80;
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+}
+
+.error-message {
+  color: #f87171;
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+}
+
+.verify-success button,
+.verify-error button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}

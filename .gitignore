@@ -1,0 +1,51 @@
+HELP.md
+### Build & Dependency Caches ###
+.m2/
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### Scratch & Temp Files ###
+scratch/
+
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Environment & Secrets ###
+.env
+*.pem
+*.key
+*.log
+
+### Frontend & Dependencies ###
+node_modules/
+dist/
+build/
+.DS_Store

@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CATALOG SERVICE — service-specific configuration
+# Owns: artist, album, track tables
+# Integrates with: MusicBrainz API, Cover Art Archive API
+# Caches MusicBrainz responses in Redis
+# Port: 8082
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  port: 8082
+
+spring:
+  application:
+    name: catalog-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/catalog_db}
+    username: ${SPRING_DATASOURCE_USERNAME:aficio_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:aficio_password}
+    hikari:
+      pool-name: catalog-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  flyway:
+    locations: classpath:db/migration
+    schemas: public
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000   # 1 hour — MusicBrainz data changes rarely
+
+aficio:
+  musicbrainz:
+    user-agent: AficioMusic/1.0.0 (https://github.com/aficio/aficio)
+    base-url: https://musicbrainz.org/ws/2
+  coverart:
+    base-url: https://coverartarchive.org
+
+logging:
+  level:
+    com.aficio.catalog: DEBUG

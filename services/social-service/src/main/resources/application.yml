@@ -1,0 +1,59 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: social-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/social_db}
+    username: ${SPRING_DATASOURCE_USERNAME:aficio_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:aficio_password}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    locations: classpath:db/migration
+    schemas: public
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+aficio:
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-production-to-a-long-random-string}
+  redis:
+    enabled: ${AFICIO_REDIS_ENABLED:true}
+  cors:
+    allowed-origins: ${AFICIO_CORS_ALLOWED_ORIGINS:http://localhost:*,http://localhost:5174,http://localhost:5173,http://localhost:3000}
+  auth:
+    service-url: ${AFICIO_AUTH_SERVICE_URL:http://localhost:8081}
+  catalog:
+    service-url: ${AFICIO_CATALOG_SERVICE_URL:http://localhost:8082}
+
+feign:
+  circuitbreaker:
+    enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      auth-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      catalog-service:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s

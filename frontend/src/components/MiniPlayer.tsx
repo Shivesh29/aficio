@@ -428,6 +428,12 @@ export const MiniPlayer: React.FC = () => {
             <X size={18} />
           </button>
         </div>
+
+        {/* Mobile Edge Progress Line */}
+        <div
+          className="miniplayer-progress-line-mobile"
+          style={{ width: `${progressPercent}%` }}
+        />
       </div>
     </aside>
   );

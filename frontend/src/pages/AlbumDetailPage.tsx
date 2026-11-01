@@ -52,6 +52,7 @@ export const AlbumDetailPage = () => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [deletingReview, setDeletingReview] = useState(false);
   const [isDeleteReviewModalOpen, setIsDeleteReviewModalOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'tracks' | 'reviews'>('tracks');
 
   // Quick star rating state
   const [hoveredStar, setHoveredStar] = useState<number | null>(null);
@@ -408,6 +409,164 @@ export const AlbumDetailPage = () => {
         <span className="current">{album.title}</span>
       </div>
 
+      {/* Mobile Hero View (Active on mobile screens < 768px) */}
+      <div className="album-mobile-hero">
+        <div className="mobile-hero-cover-container">
+          <div
+            className="mobile-hero-cover-ambient"
+            style={{ backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})` }}
+          />
+          <img
+            src={album.coverArtUrl || FALLBACK_COVER}
+            alt={`${album.title} cover`}
+            className="mobile-hero-cover-img"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = FALLBACK_COVER;
+            }}
+          />
+          <div className="mobile-badge-tag">
+            <span>AFC / #{String(album.id).padStart(3, '0')}</span>
+          </div>
+        </div>
+
+        <div className="mobile-hero-meta">
+          <h1 className="mobile-hero-title">{album.title}</h1>
+          <p className="mobile-hero-artist">
+            By{' '}
+            {album.artist?.musicBrainzId ? (
+              <Link to={`/artist/${album.artist.musicBrainzId}`} className="artist-link-gold" title={`View releases by ${album.artist.name}`}>
+                <strong>{album.artist?.name}</strong>
+              </Link>
+            ) : (
+              <strong>{album.artist?.name || 'Unknown Artist'}</strong>
+            )}
+          </p>
+
+          <div className="mobile-hero-stats-row">
+            <div className="mobile-stat-score">
+              <Star size={13} className="star-gold" />
+              <span>{averageRating ? `${averageRating} / 5` : 'Unrated'}</span>
+              {ratingsList.length > 0 && <span className="stat-count">({ratingsList.length})</span>}
+            </div>
+            <span className="dot">•</span>
+            <span>{tracks.length} songs</span>
+            {totalMinutes > 0 && (
+              <>
+                <span className="dot">•</span>
+                <span>{totalMinutes} min</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile Action Controls */}
+        <div className="mobile-hero-actions">
+          {tracks.length > 0 && (
+            <button
+              type="button"
+              className="mobile-hero-play-btn"
+              onClick={() => {
+                const isCurrentAlbum = tracks.some((t) => t.id === currentTrackId);
+                if (isCurrentAlbum) {
+                  togglePlay();
+                } else if (album) {
+                  playTrack(tracks[0], album, tracks);
+                }
+              }}
+            >
+              {isPlayerPlaying && tracks.some((t) => t.id === currentTrackId) ? (
+                <>
+                  <Pause size={18} />
+                  <span>Pause Album</span>
+                </>
+              ) : (
+                <>
+                  <Play size={18} className="play-icon-offset" />
+                  <span>Play Album</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Quick Actions Grid: Star Rating + Review + Add to Collection */}
+          <div className="mobile-hero-secondary-grid">
+            <div className="mobile-quick-star-strip">
+              <div className="mobile-star-strip-label">
+                <Star size={12} style={currentUserRating ? { fill: '#e5a93b', color: '#e5a93b' } : undefined} />
+                <span>{currentUserRating ? `You: ${currentUserRating}★` : 'Rate'}</span>
+                {currentUserRating && (
+                  <button
+                    type="button"
+                    className="mobile-star-clear-btn"
+                    onClick={handleClearRating}
+                    disabled={quickRatingLoading}
+                    title="Clear rating"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="mobile-stars-buttons">
+                {[1, 2, 3, 4, 5].map((starVal) => {
+                  const isFilled = (hoveredStar ?? currentUserRating ?? 0) >= starVal;
+                  return (
+                    <button
+                      key={starVal}
+                      type="button"
+                      className="mobile-star-tap-btn"
+                      onClick={() => handleQuickStar(starVal)}
+                      disabled={quickRatingLoading}
+                      title={`Rate ${starVal} star${starVal > 1 ? 's' : ''}`}
+                    >
+                      <Star size={17} className={isFilled ? 'star-gold-fill' : 'star-gold-outline'} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="mobile-action-pill-btn"
+              onClick={handleOpenReviewModal}
+              style={hasWrittenReview ? { borderColor: 'rgba(229, 169, 59, 0.45)', color: 'var(--accent-gold, #e5a93b)' } : undefined}
+            >
+              <MessageSquare size={16} />
+              <span>{hasWrittenReview ? 'Edit Review' : 'Review'}</span>
+            </button>
+
+            <button
+              type="button"
+              className="mobile-action-pill-btn"
+              onClick={handleOpenListModal}
+            >
+              <Bookmark size={16} />
+              <span>Collect</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Segmented Tab Switcher */}
+        <div className="mobile-dossier-segmented-tabs">
+          <button
+            type="button"
+            className={`mobile-tab-btn ${mobileTab === 'tracks' ? 'is-active-tab' : ''}`}
+            onClick={() => setMobileTab('tracks')}
+          >
+            <Music size={15} />
+            <span>Tracklist ({tracks.length})</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-tab-btn ${mobileTab === 'reviews' ? 'is-active-tab' : ''}`}
+            onClick={() => setMobileTab('reviews')}
+          >
+            <MessageSquare size={15} />
+            <span>Reviews ({writtenReviewsList.length})</span>
+          </button>
+        </div>
+      </div>
+
       {/* Main Dossier Grid */}
       <div className="dossier-main-layout">
         {/* Left Column: Big Vinyl Cover and Actions */}
@@ -584,7 +743,7 @@ export const AlbumDetailPage = () => {
           </header>
 
           {/* Tracklist Section */}
-          <section className="dossier-tracklist-section">
+          <section className={`dossier-tracklist-section ${mobileTab === 'tracks' ? 'tab-visible' : 'tab-hidden'}`}>
             <div className="section-subheading">
               <h3>
                 <Music size={16} />
@@ -649,7 +808,7 @@ export const AlbumDetailPage = () => {
           </section>
 
           {/* Community Reviews Section */}
-          <section className="dossier-reviews-section">
+          <section className={`dossier-reviews-section ${mobileTab === 'reviews' ? 'tab-visible' : 'tab-hidden'}`}>
             <div className="section-subheading">
               <h3>
                 <MessageSquare size={16} />

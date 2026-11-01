@@ -38,7 +38,7 @@ public class ArtistController {
     @PostMapping("/artists/import")
     public ArtistResponse importArtist(@Valid @RequestBody MusicBrainzArtistRequest request) {
         Artist existingArtist = artistRepository
-                .findByMusicBrainzId(request.musicBrainzId())
+                .findFirstByMusicBrainzIdOrderByIdAsc(request.musicBrainzId())
                 .orElse(null);
 
         if (existingArtist != null) {

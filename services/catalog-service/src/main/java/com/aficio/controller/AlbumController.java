@@ -246,7 +246,7 @@ public class AlbumController {
             @RequestBody MusicBrainzRelease release
     ) {
         Album existingAlbum = albumRepository
-                .findByMusicBrainzId(release.id())
+                .findFirstByMusicBrainzIdOrderByIdAsc(release.id())
                 .orElse(null);
 
         String releaseGroupId = release.releaseGroup() != null ? release.releaseGroup().id() : null;

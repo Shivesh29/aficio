@@ -13,6 +13,8 @@ public interface UserAlbumHistoryRepository extends JpaRepository<UserAlbumHisto
 
     List<UserAlbumHistory> findByUsernameIgnoreCaseAndSyncedTrueOrderByPlayedAtDesc(String username);
 
+    Optional<UserAlbumHistory> findFirstByUsernameIgnoreCaseAndAlbumIdOrderByIdDesc(String username, Long albumId);
+
     Optional<UserAlbumHistory> findByUsernameIgnoreCaseAndAlbumId(String username, Long albumId);
 
     boolean existsByUsernameIgnoreCaseAndAlbumId(String username, Long albumId);

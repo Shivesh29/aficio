@@ -97,7 +97,7 @@ public class CatalogService {
             );
         }
 
-        Album album = albumRepository.findByMusicBrainzId(musicBrainzId)
+        Album album = albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(musicBrainzId)
                 .orElseGet(() -> createAlbum(details, musicBrainzId));
 
         if (album.getCoverArtUrl() == null) {
@@ -270,10 +270,10 @@ public class CatalogService {
         final String finalArtistMbId = artistMbId;
         Artist artist;
         if (finalArtistMbId != null) {
-            artist = artistRepository.findByMusicBrainzId(finalArtistMbId)
+            artist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(finalArtistMbId)
                     .orElseGet(() -> artistRepository.save(new Artist(finalArtistName, finalArtistMbId)));
         } else {
-            artist = artistRepository.findByName(finalArtistName)
+            artist = artistRepository.findFirstByNameOrderByIdAsc(finalArtistName)
                     .orElseGet(() -> artistRepository.save(new Artist(finalArtistName, null)));
         }
 

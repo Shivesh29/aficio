@@ -4892,21 +4892,40 @@
   }
 
   .miniplayer-art-wrap {
-    width: 38px;
-    height: 38px;
-    border-radius: 8px;
+    position: relative;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1.5px solid rgba(229, 169, 59, 0.45);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     flex-shrink: 0;
-    cursor: pointer;
+    cursor: default;
+  }
+
+  .miniplayer-art-wrap.is-spinning {
+    animation: spinRecord 6s linear infinite;
   }
 
   .miniplayer-art {
-    width: 38px;
-    height: 38px;
-    border-radius: 8px;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
   }
 
   .miniplayer-vinyl-hole {
-    display: none;
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 8px;
+    background: var(--bg-base, #0c0d12);
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    border-radius: 50%;
+    z-index: 2;
   }
 
   .miniplayer-text-details {
@@ -4998,11 +5017,15 @@
   }
 
   .miniplayer-actions .action-btn {
-    padding: 0.3rem;
+    padding: 0.35rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    transition: all 0.2s ease;
   }
 
   .miniplayer-actions .action-btn svg {
@@ -5010,10 +5033,15 @@
     height: 16px;
   }
 
+  .miniplayer-actions .action-btn.video-toggle-btn {
+    border-color: rgba(229, 169, 59, 0.25);
+  }
+
   .miniplayer-actions .action-btn.video-toggle-btn.is-active {
-    color: var(--accent-gold, #e5a93b);
-    background: rgba(229, 169, 59, 0.2);
-    border: 1px solid rgba(229, 169, 59, 0.4);
+    color: #0c0d10;
+    background: var(--accent-gold, #e5a93b);
+    border-color: var(--accent-gold, #e5a93b);
+    box-shadow: 0 0 10px rgba(229, 169, 59, 0.4);
   }
 
   .miniplayer-timeline {

@@ -6,6 +6,7 @@ import {
   SkipBack,
   SkipForward,
   X,
+  Maximize2,
   Minimize2,
   ExternalLink,
   Loader2,
@@ -15,8 +16,7 @@ import {
   VolumeX,
   ListMusic,
   AlertCircle,
-  Sparkles,
-  Tv
+  Sparkles
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -246,12 +246,7 @@ export const MiniPlayer: React.FC = () => {
       <div className="miniplayer-bar">
         {/* Left: Track Info & Album Art */}
         <div className="miniplayer-track-info">
-          <div
-            className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}
-            onClick={toggleExpanded}
-            style={{ cursor: 'pointer' }}
-            title={isExpanded ? 'Hide video' : 'Watch video stream'}
-          >
+          <div className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}>
             <img
               src={currentPlayback?.coverArtUrl || FALLBACK_COVER}
               alt={currentPlayback?.albumTitle || 'Album Art'}
@@ -420,9 +415,10 @@ export const MiniPlayer: React.FC = () => {
             type="button"
             className={`action-btn video-toggle-btn ${isExpanded ? 'is-active' : ''}`}
             onClick={toggleExpanded}
-            title={isExpanded ? 'Hide video window' : 'Watch YouTube video in player'}
+            title={isExpanded ? 'Hide video window' : 'Watch video in floating player'}
+            aria-label={isExpanded ? 'Hide video window' : 'Watch video in floating player'}
           >
-            {isExpanded ? <Minimize2 size={18} /> : <Tv size={18} />}
+            {isExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
 
           {ytVideoId && (

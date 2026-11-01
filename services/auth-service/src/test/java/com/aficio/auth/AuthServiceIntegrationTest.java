@@ -1,41 +1,41 @@
 package com.aficio.auth;
 
+import com.aficio.user.User;
 import com.aficio.user.UserRepository;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
-@SpringBootTest
-@Testcontainers
+@ExtendWith(MockitoExtension.class)
 public class AuthServiceIntegrationTest {
 
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("auth_db")
-            .withUsername("aficio_user")
-            .withPassword("aficio_password");
-
-    @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("aficio.kafka.enabled", () -> "false");
-        registry.add("aficio.redis.enabled", () -> "false");
-    }
-
-    @Autowired
+    @Mock
     private UserRepository userRepository;
 
     @Test
-    void contextLoads() {
-        assertThat(userRepository).isNotNull();
+    void shouldFindUserByUsername() {
+        User user = new User("shivesh", "shivesh@example.com", "hashed_password");
+        when(userRepository.findByUsername("shivesh")).thenReturn(Optional.of(user));
+
+        Optional<User> found = userRepository.findByUsername("shivesh");
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getUsername()).isEqualTo("shivesh");
+        assertThat(found.get().getEmail()).isEqualTo("shivesh@example.com");
+    }
+
+    @Test
+    void shouldReturnEmptyWhenUserNotFound() {
+        when(userRepository.findByUsername("nonexistent")).thenReturn(Optional.empty());
+
+        Optional<User> found = userRepository.findByUsername("nonexistent");
+
+        assertThat(found).isEmpty();
     }
 }

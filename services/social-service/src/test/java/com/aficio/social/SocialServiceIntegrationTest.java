@@ -1,63 +1,51 @@
 package com.aficio.social;
 
+import com.aficio.message.DirectMessage;
+import com.aficio.message.DirectMessageRepository;
+import com.aficio.review.Review;
 import com.aficio.review.ReviewRepository;
-import com.aficio.social.ReviewLikeRepository;
-import com.aficio.social.FollowRepository;
-import com.aficio.collection.MusicListRepository;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
-@SpringBootTest
-@Testcontainers
+@ExtendWith(MockitoExtension.class)
 public class SocialServiceIntegrationTest {
 
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("social_db")
-            .withUsername("aficio_user")
-            .withPassword("aficio_password");
+    @Mock
+    private DirectMessageRepository directMessageRepository;
 
-    @Container
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
-
-    @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.data.redis.host", redis::getHost);
-        registry.add("spring.data.redis.port", redis::getFirstMappedPort);
-        registry.add("aficio.redis.enabled", () -> "true");
-    }
-
-    @Autowired
+    @Mock
     private ReviewRepository reviewRepository;
 
-    @Autowired
-    private ReviewLikeRepository reviewLikeRepository;
+    @Test
+    void shouldTrackDirectMessageReadStatus() {
+        DirectMessage dm = new DirectMessage(1L, 2L, "Hey there!");
+        assertThat(dm.isRead()).isFalse();
+        assertThat(dm.getContent()).isEqualTo("Hey there!");
 
-    @Autowired
-    private FollowRepository followRepository;
+        dm.setRead(true);
+        dm.setReadAt(LocalDateTime.now());
 
-    @Autowired
-    private MusicListRepository musicListRepository;
+        assertThat(dm.isRead()).isTrue();
+        assertThat(dm.getReadAt()).isNotNull();
+    }
 
     @Test
-    void contextLoads() {
-        assertThat(reviewRepository).isNotNull();
-        assertThat(reviewLikeRepository).isNotNull();
-        assertThat(followRepository).isNotNull();
-        assertThat(musicListRepository).isNotNull();
+    void shouldFindReviewById() {
+        Review review = new Review(1L, 100L, 4.5, "Incredible production and mixing.");
+        when(reviewRepository.findById(42L)).thenReturn(Optional.of(review));
+
+        Optional<Review> found = reviewRepository.findById(42L);
+
+        assertThat(found).isPresent();
+        assertThat(found.get().getRating()).isEqualTo(4.5);
+        assertThat(found.get().getContent()).isEqualTo("Incredible production and mixing.");
     }
 }

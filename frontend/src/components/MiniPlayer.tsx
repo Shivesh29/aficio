@@ -6,7 +6,6 @@ import {
   SkipBack,
   SkipForward,
   X,
-  Maximize2,
   Minimize2,
   ExternalLink,
   Loader2,
@@ -16,7 +15,8 @@ import {
   VolumeX,
   ListMusic,
   AlertCircle,
-  Sparkles
+  Sparkles,
+  Tv
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -163,14 +163,27 @@ export const MiniPlayer: React.FC = () => {
             <Radio size={14} className="pulse-icon" />
             <span>YouTube Audio Stream</span>
           </div>
-          <button
-            type="button"
-            className="video-minimize-btn"
-            onClick={toggleExpanded}
-            title="Minimize video window"
-          >
-            <Minimize2 size={14} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {ytVideoId && (
+              <a
+                href={`https://www.youtube.com/watch?v=${ytVideoId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="video-minimize-btn"
+                title="Open video on YouTube"
+              >
+                <ExternalLink size={13} />
+              </a>
+            )}
+            <button
+              type="button"
+              className="video-minimize-btn"
+              onClick={toggleExpanded}
+              title="Minimize video window"
+            >
+              <Minimize2 size={14} />
+            </button>
+          </div>
         </div>
         <div className="miniplayer-iframe-wrapper">
           {ytVideoId ? (
@@ -233,7 +246,12 @@ export const MiniPlayer: React.FC = () => {
       <div className="miniplayer-bar">
         {/* Left: Track Info & Album Art */}
         <div className="miniplayer-track-info">
-          <div className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}>
+          <div
+            className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}
+            onClick={toggleExpanded}
+            style={{ cursor: 'pointer' }}
+            title={isExpanded ? 'Hide video' : 'Watch video stream'}
+          >
             <img
               src={currentPlayback?.coverArtUrl || FALLBACK_COVER}
               alt={currentPlayback?.albumTitle || 'Album Art'}
@@ -400,11 +418,11 @@ export const MiniPlayer: React.FC = () => {
           {/* Video Popout Button */}
           <button
             type="button"
-            className={`action-btn ${isExpanded ? 'is-active' : ''}`}
+            className={`action-btn video-toggle-btn ${isExpanded ? 'is-active' : ''}`}
             onClick={toggleExpanded}
-            title={isExpanded ? 'Hide video window' : 'Watch video in floating player'}
+            title={isExpanded ? 'Hide video window' : 'Watch YouTube video in player'}
           >
-            {isExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            {isExpanded ? <Minimize2 size={18} /> : <Tv size={18} />}
           </button>
 
           {ytVideoId && (

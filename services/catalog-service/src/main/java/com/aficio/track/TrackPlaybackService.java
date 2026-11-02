@@ -617,21 +617,27 @@ public class TrackPlaybackService {
                 }
             }
 
-            // If still not found, try prefix search e.g. "If You Must" -> "If You Must (Demo)"
+            // If still not found, try prefix and compound search e.g. "If You Must" -> "If You Must (Demo)"
+            // or "Fairies Wear Boots" -> "Jack the Stripper / Fairies Wear Boots"
             if (results.isEmpty()) {
                 String cleanBase = normalizeTitleForCatalog(title);
                 if (!cleanBase.isBlank()) {
-                    String prefixSql = """
+                    String patternSql = """
                         SELECT song_id FROM youtube_catalog
                         WHERE LOWER(artist) = LOWER(?)
-                          AND (LOWER(title) LIKE LOWER(?) || ' (%' OR LOWER(title) LIKE LOWER(?) || ' - %')
+                          AND (
+                            LOWER(title) LIKE LOWER(?) || ' (%'
+                            OR LOWER(title) LIKE LOWER(?) || ' - %'
+                            OR LOWER(title) LIKE '% / ' || LOWER(?) || '%'
+                            OR LOWER(title) LIKE '%' || LOWER(?) || ' / %'
+                          )
                         ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
                         LIMIT 1
                     """;
                     results = jdbcTemplate.query(
-                            prefixSql,
+                            patternSql,
                             (rs, rowNum) -> rs.getString("song_id"),
-                            artistName, cleanBase, cleanBase, albumTitle, albumTitle
+                            artistName, cleanBase, cleanBase, cleanBase, cleanBase, albumTitle, albumTitle
                     );
                 }
             }
@@ -705,17 +711,22 @@ public class TrackPlaybackService {
                 if (results.isEmpty()) {
                     String cleanBase = normalizeTitleForCatalog(title);
                     if (!cleanBase.isBlank()) {
-                        String prefixSql = """
+                        String patternSql = """
                             SELECT song_id FROM youtube_catalog
                             WHERE LOWER(artist) = LOWER(?)
-                              AND (LOWER(title) LIKE LOWER(?) || ' (%' OR LOWER(title) LIKE LOWER(?) || ' - %')
+                              AND (
+                                LOWER(title) LIKE LOWER(?) || ' (%'
+                                OR LOWER(title) LIKE LOWER(?) || ' - %'
+                                OR LOWER(title) LIKE '% / ' || LOWER(?) || '%'
+                                OR LOWER(title) LIKE '%' || LOWER(?) || ' / %'
+                              )
                             ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
                             LIMIT 1
                         """;
                         results = jdbcTemplate.query(
-                                prefixSql,
+                                patternSql,
                                 (rs, rowNum) -> rs.getString("song_id"),
-                                artistName, cleanBase, cleanBase, albumTitle, albumTitle
+                                artistName, cleanBase, cleanBase, cleanBase, cleanBase, albumTitle, albumTitle
                         );
                     }
                 }

@@ -333,5 +333,19 @@ public class TrackPlaybackServiceTest {
         assertThat(officialChannelScore).isGreaterThan(tributeScore);
         assertThat(tributeScore).isLessThan(0); // Penalized
     }
+
+    @Test
+    void shouldMatchTracksWithHqHdTagsAndCombinedTitles() {
+        String artist = "Pink Floyd";
+        String album = "The Dark Side of the Moon";
+
+        // Speak to Me / Breathe in the Air matching Speak to Me (HQ) Lyrics
+        assertThat(trackPlaybackService.isTrackTitleMatch("Speak to Me / Breathe in the Air", "Pink Floyd - Speak to Me (HQ) Lyrics", artist, album)).isTrue();
+        assertThat(trackPlaybackService.isTrackTitleMatch("Speak to Me / Breathe in the Air", "Pink Floyd - Breathe (In the Air) (HQ) Lyrics", artist, album)).isTrue();
+
+        // Standalone HQ tags
+        assertThat(trackPlaybackService.isTrackTitleMatch("On the Run", "Pink Floyd - On the Run (HQ) Lyrics", artist, album)).isTrue();
+        assertThat(trackPlaybackService.isTrackTitleMatch("Time", "Pink Floyd - Time (HQ) Lyrics", artist, album)).isTrue();
+    }
 }
 

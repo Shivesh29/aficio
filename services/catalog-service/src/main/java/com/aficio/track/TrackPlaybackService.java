@@ -1035,7 +1035,7 @@ public class TrackPlaybackService {
         if (artistName != null && !artistName.isBlank()) {
             s = s.replaceAll("(?i)" + Pattern.quote(artistName), " ");
         }
-        s = s.replaceAll("(?i)\\b(official\\s*(music\\s*)?video|official\\s*audio|visualizer|lyrics?|full\\s*album|remaster(ed)?|album\\s*version)\\b", " ");
+        s = s.replaceAll("(?i)\\b(official\\s*(music\\s*)?video|official\\s*audio|visualizer|lyrics?|full\\s*album|remaster(ed)?|album\\s*version|hq|hd|4k|deluxe|audio)\\b", " ");
         s = s.replaceAll("(?i)\\b(live\\s+(at|in)\\s+[^)]+)\\b", " ");
         return normalizeTitle(s);
     }

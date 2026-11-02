@@ -94,6 +94,7 @@ public class TrackPlaybackServiceTest {
         when(musicBrainzClient.getRecordingDetails("rec-mbid-1")).thenReturn(recording);
         when(trackRepository.findByAlbumIdOrderByPosition(any())).thenReturn(List.of(track));
 
+        trackPlaybackService.setEnableMusicBrainzIds(true);
         TrackPlaybackResponse response = trackPlaybackService.getPlayback(1L);
 
         assertThat(response).isNotNull();

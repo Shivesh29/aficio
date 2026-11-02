@@ -76,6 +76,17 @@ public class TrackPlaybackService {
     @Value("${aficio.youtube.album-sync-limit:4}")
     private int albumSyncLimit;
 
+    @Value("${aficio.playback.enable-musicbrainz-ids:false}")
+    private boolean enableMusicBrainzIds = false;
+
+    public void setEnableMusicBrainzIds(boolean enableMusicBrainzIds) {
+        this.enableMusicBrainzIds = enableMusicBrainzIds;
+    }
+
+    public boolean isEnableMusicBrainzIds() {
+        return this.enableMusicBrainzIds;
+    }
+
     /**
      * Daily album sync limit for personal YouTube API key holders.
      * Google Cloud YouTube Data API v3 grants 10,000 units/day.
@@ -367,8 +378,8 @@ public class TrackPlaybackService {
         String source = null;
         boolean newlyDiscovered = false;
 
-        // 2. MusicBrainz Recording Relations Check (0 quota units)
-        if (track.getMusicBrainzId() != null && !track.getMusicBrainzId().isBlank()) {
+        // 2. MusicBrainz Recording Relations Check (Disabled by default to strictly isolate 12M dataset)
+        if (enableMusicBrainzIds && track.getMusicBrainzId() != null && !track.getMusicBrainzId().isBlank()) {
             try {
                 youtubeVideoId = resolveFromMusicBrainz(track);
                 if (youtubeVideoId != null) {
@@ -804,8 +815,8 @@ public class TrackPlaybackService {
             }
         }
 
-        // 2. Try direct playlist ID from MusicBrainz release-group relations (0 search units)
-        if (workingPlaylistId == null) {
+        // 2. Try direct playlist ID from MusicBrainz release-group relations (Disabled by default to strictly isolate 12M dataset)
+        if (enableMusicBrainzIds && workingPlaylistId == null) {
             String mbPlaylistId = resolveMusicBrainzPlaylistId(album);
             if (mbPlaylistId != null && !mbPlaylistId.isBlank()) {
                 List<PlaylistItem> candidateItems = fetchPlaylistItems(mbPlaylistId, effectiveApiKey);

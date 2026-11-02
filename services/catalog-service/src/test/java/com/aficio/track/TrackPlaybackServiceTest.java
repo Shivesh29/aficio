@@ -347,5 +347,39 @@ public class TrackPlaybackServiceTest {
         assertThat(trackPlaybackService.isTrackTitleMatch("On the Run", "Pink Floyd - On the Run (HQ) Lyrics", artist, album)).isTrue();
         assertThat(trackPlaybackService.isTrackTitleMatch("Time", "Pink Floyd - Time (HQ) Lyrics", artist, album)).isTrue();
     }
+
+    @Test
+    void shouldResolveFromYoutubeCatalogWhenPresent() {
+        org.springframework.jdbc.core.JdbcTemplate mockJdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        org.springframework.beans.factory.ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbcProvider = mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(jdbcProvider.getIfAvailable()).thenReturn(mockJdbc);
+
+        TrackPlaybackService serviceWithJdbc = new TrackPlaybackService(
+                trackRepository,
+                albumRepository,
+                musicBrainzClient,
+                objectMapper,
+                null,
+                null,
+                jdbcProvider
+        );
+
+        Artist artist = new Artist("Meth Wax", "artist-mbid-2");
+        Album album = new Album("Meth Wax", "release-mbid-2", artist);
+        Track track = new Track(null, "Dance With Me", 1, 160000, album);
+
+        when(trackRepository.findById(2L)).thenReturn(Optional.of(track));
+        when(trackRepository.findByAlbumIdOrderByPosition(any())).thenReturn(List.of(track));
+        when(mockJdbc.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any(), any(), any()))
+                .thenReturn(List.of("fP1hR4Gf50k"));
+
+        TrackPlaybackResponse response = serviceWithJdbc.getPlayback(2L);
+
+        assertThat(response).isNotNull();
+        assertThat(response.youtubeVideoId()).isEqualTo("fP1hR4Gf50k");
+        assertThat(response.source()).isEqualTo("youtube_catalog");
+        assertThat(response.newlyDiscovered()).isFalse();
+        verify(trackRepository, atLeastOnce()).save(track);
+    }
 }
 

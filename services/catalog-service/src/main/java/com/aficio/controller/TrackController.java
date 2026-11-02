@@ -34,6 +34,7 @@ public class TrackController {
     private final AlbumRepository albumRepository;
     private final MusicBrainzClient musicBrainzClient;
     private final TrackPlaybackService trackPlaybackService;
+    private final com.aficio.catalog.CatalogService catalogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TrackController.class);
 
@@ -42,17 +43,25 @@ public class TrackController {
             AlbumRepository albumRepository,
             MusicBrainzClient musicBrainzClient,
             TrackPlaybackService trackPlaybackService,
+            com.aficio.catalog.CatalogService catalogService,
             com.fasterxml.jackson.databind.ObjectMapper objectMapper
     ) {
         this.trackRepository = trackRepository;
         this.albumRepository = albumRepository;
         this.musicBrainzClient = musicBrainzClient;
         this.trackPlaybackService = trackPlaybackService;
+        this.catalogService = catalogService;
         this.objectMapper = objectMapper;
     }
 
     @GetMapping("/tracks")
     public List<TrackResponse> getTracks(@RequestParam Long albumId) {
+        if (catalogService != null) {
+            Album album = albumRepository.findById(albumId).orElse(null);
+            if (album != null) {
+                catalogService.reconcileTracksWithDataset(album);
+            }
+        }
         return trackRepository.findByAlbumIdOrderByPosition(albumId)
                 .stream()
                 .map(CatalogMapper::toTrackResponse)

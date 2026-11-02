@@ -64,6 +64,10 @@ public class Track {
         return position;
     }
 
+    public void setPosition(Integer position) {
+        this.position = position;
+    }
+
     public Integer getLengthMilliseconds() {
         return lengthMilliseconds;
     }

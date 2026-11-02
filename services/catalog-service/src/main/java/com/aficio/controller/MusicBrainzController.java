@@ -22,10 +22,12 @@ import java.util.Map;
 public class MusicBrainzController {
 
     private final MusicBrainzClient musicBrainzClient;
+    private final com.aficio.catalog.CatalogService catalogService;
     private static final Logger log = LoggerFactory.getLogger(MusicBrainzController.class);
 
-    public MusicBrainzController(MusicBrainzClient musicBrainzClient) {
+    public MusicBrainzController(MusicBrainzClient musicBrainzClient, com.aficio.catalog.CatalogService catalogService) {
         this.musicBrainzClient = musicBrainzClient;
+        this.catalogService = catalogService;
     }
 
     @GetMapping("/musicbrainz/artists")
@@ -39,7 +41,7 @@ public class MusicBrainzController {
     public MusicBrainzReleaseSearchResponse getArtistReleases(
             @PathVariable String artistId
     ) {
-        return musicBrainzClient.getArtistReleases(artistId);
+        return catalogService.getArtistReleasesWithDataset(artistId);
     }
 
     @GetMapping("/musicbrainz/artists/{artistId}")
@@ -56,8 +58,8 @@ public class MusicBrainzController {
     ) {
         return switch (type.toLowerCase()) {
             case "artist" -> musicBrainzClient.searchArtists(query);
-            case "artist-releases" -> musicBrainzClient.getArtistReleases(query);
-            case "album" -> musicBrainzClient.searchReleases(query);
+            case "artist-releases" -> catalogService.getArtistReleasesWithDataset(query);
+            case "album" -> catalogService.searchReleasesWithDataset(query);
             case "track" -> musicBrainzClient.searchRecordings(query);
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Unsupported search type. Use artist, album, track, or artist-releases.");

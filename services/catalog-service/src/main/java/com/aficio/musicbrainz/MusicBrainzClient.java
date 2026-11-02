@@ -142,13 +142,22 @@ public class MusicBrainzClient {
                 }
 
                 // Priority 3: Earliest release year
-                int yA = extractYear(a.date());
-                int yB = extractYear(b.date());
+                int yA = extractYearForRelease(a);
+                int yB = extractYearForRelease(b);
                 if (yA != yB) {
                     return Integer.compare(yA, yB);
                 }
 
-                // Priority 4: Preferred major markets (GB, US, XW, XE)
+                // Priority 4: Query text matching artist credit
+                String queryLower = title != null ? title.toLowerCase() : "";
+                boolean artistMatchA = a.artistCredit() != null && a.artistCredit().stream()
+                        .anyMatch(ac -> ac.name() != null && queryLower.contains(ac.name().toLowerCase()));
+                boolean artistMatchB = b.artistCredit() != null && b.artistCredit().stream()
+                        .anyMatch(ac -> ac.name() != null && queryLower.contains(ac.name().toLowerCase()));
+                if (artistMatchA && !artistMatchB) return -1;
+                if (!artistMatchA && artistMatchB) return 1;
+
+                // Priority 5: Preferred major markets (GB, US, XW, XE)
                 String cA = a.country() != null ? a.country().toUpperCase() : "";
                 String cB = b.country() != null ? b.country().toUpperCase() : "";
                 boolean mktA = List.of("GB", "US", "XW", "XE").contains(cA);
@@ -162,6 +171,16 @@ public class MusicBrainzClient {
         }
 
         return response;
+    }
+
+    private int extractYearForRelease(MusicBrainzRelease rel) {
+        if (rel == null) return 9999;
+        int y = extractYear(rel.date());
+        if (y != 9999) return y;
+        if (rel.releaseGroup() != null) {
+            return extractYear(rel.releaseGroup().firstReleaseDate());
+        }
+        return 9999;
     }
 
     @Cacheable(value = "musicbrainzReleaseDetails", key = "#releaseId")
@@ -245,7 +264,7 @@ public class MusicBrainzClient {
     @Cacheable(value = "musicbrainzArtistReleases", key = "#artistMbid")
     public MusicBrainzReleaseSearchResponse getArtistReleases(String artistMbid) {
         String cleanMbid = cleanQuery(artistMbid);
-        String lucene = "arid:" + cleanMbid + " AND primarytype:album AND status:official";
+        String lucene = "arid:" + cleanMbid + " AND (primarytype:album OR primarytype:single OR primarytype:ep) AND status:official";
         List<MusicBrainzRelease> allReleases = new ArrayList<>();
 
         MusicBrainzReleaseSearchResponse page1 = fetchReleases(lucene, 0, 100);
@@ -259,7 +278,7 @@ public class MusicBrainzClient {
                 }
             }
         } else {
-            MusicBrainzReleaseSearchResponse fallback = fetchReleases("arid:" + cleanMbid + " AND primarytype:album", 0, 100);
+            MusicBrainzReleaseSearchResponse fallback = fetchReleases("arid:" + cleanMbid, 0, 100);
             if (fallback != null && fallback.releases() != null) {
                 allReleases.addAll(fallback.releases());
             }
@@ -269,20 +288,21 @@ public class MusicBrainzClient {
             return new MusicBrainzReleaseSearchResponse(0, Collections.emptyList());
         }
 
-        // Pre-calculate earliest valid release year per release group among releases with valid tracks (strictly albums with >= 5 tracks)
+        // Pre-calculate earliest valid release year per release group among releases with valid tracks
         Map<String, Integer> earliestYearByRg = new HashMap<>();
         for (MusicBrainzRelease rel : allReleases) {
             int trackCount = rel.trackCount() != null ? rel.trackCount() : 0;
-            if (trackCount < 5) {
-                continue; // Skip individual tracks, singles, and short promos
+            if (trackCount < 1) {
+                continue; // Skip releases with 0 tracks
             }
             MusicBrainzReleaseGroup rg = rel.releaseGroup();
-            if (rg != null && rg.primaryType() != null && !"Album".equalsIgnoreCase(rg.primaryType())) {
-                continue; // Skip singles, EPs, etc.
+            String pType = rg != null && rg.primaryType() != null ? rg.primaryType() : "Album";
+            if ("Album".equalsIgnoreCase(pType) && trackCount < 4) {
+                continue; // Broken album stub
             }
             String key = (rg != null && rg.id() != null)
                     ? rg.id()
-                    : normalizeReleaseTitle(rel.title()) + "::album";
+                    : normalizeReleaseTitle(rel.title()) + "::" + pType.toLowerCase();
             int year = extractYear(rel.date());
             if (year > 1900 && year < 9999) {
                 earliestYearByRg.merge(key, year, Math::min);
@@ -295,16 +315,17 @@ public class MusicBrainzClient {
 
         for (MusicBrainzRelease rel : allReleases) {
             int trackCount = rel.trackCount() != null ? rel.trackCount() : 0;
-            if (trackCount < 5) {
+            if (trackCount < 1) {
                 continue;
             }
             MusicBrainzReleaseGroup rg = rel.releaseGroup();
-            if (rg != null && rg.primaryType() != null && !"Album".equalsIgnoreCase(rg.primaryType())) {
+            String pType = rg != null && rg.primaryType() != null ? rg.primaryType() : "Album";
+            if ("Album".equalsIgnoreCase(pType) && trackCount < 4) {
                 continue;
             }
             String key = (rg != null && rg.id() != null)
                     ? rg.id()
-                    : normalizeReleaseTitle(rel.title()) + "::album";
+                    : normalizeReleaseTitle(rel.title()) + "::" + pType.toLowerCase();
 
             int earliestYear = earliestYearByRg.getOrDefault(key, 9999);
             int score = scoreRelease(rel, rg, earliestYear);
@@ -340,11 +361,11 @@ public class MusicBrainzClient {
 
     private int scoreRelease(MusicBrainzRelease release, MusicBrainzReleaseGroup rg, int earliestYearInGroup) {
         int trackCount = release.trackCount() != null ? release.trackCount() : 0;
-        // Severe penalty if track count is less than 5 (singles or incomplete tracks)
-        if (trackCount < 5) {
+        if (trackCount < 1) {
             return -10000;
         }
-        if (rg != null && rg.primaryType() != null && !"Album".equalsIgnoreCase(rg.primaryType())) {
+        String pType = rg != null && rg.primaryType() != null ? rg.primaryType() : "Album";
+        if ("Album".equalsIgnoreCase(pType) && trackCount < 4) {
             return -10000;
         }
 
@@ -364,7 +385,7 @@ public class MusicBrainzClient {
             }
         }
 
-        // Exact match with first release date (e.g. "1979-06-15")
+        // Exact match with first release date (e.g. "1970-02-13")
         String firstDate = rg != null && rg.firstReleaseDate() != null ? rg.firstReleaseDate() : "";
         String relDate = release.date() != null ? release.date() : "";
         if (!firstDate.isBlank() && !relDate.isBlank()) {
@@ -388,6 +409,11 @@ public class MusicBrainzClient {
             }
         }
 
+        // Penalize releases with compound slash medleys in title (e.g. vinyl mashups)
+        if (titleLower.contains(" / ")) {
+            score -= 150;
+        }
+
         // 4. Prefer original major Western / global markets (GB, US, XW, XE) over regional import pressings
         String country = release.country() != null ? release.country().toUpperCase() : "";
         if (List.of("GB", "US", "XW", "XE").contains(country)) {
@@ -401,8 +427,14 @@ public class MusicBrainzClient {
             score += Math.min(relDate.length(), 10);
         }
 
-        // 6. When years match and everything else is equal, prefer the standard tracklist over deluxe bloat
-        score -= trackCount;
+        // 6. Prefer standard studio album track count (7 to 18 tracks), penalize extreme bloat (>25)
+        if ("Album".equalsIgnoreCase(pType)) {
+            if (trackCount >= 7 && trackCount <= 18) {
+                score += 50;
+            } else if (trackCount > 25) {
+                score -= (trackCount - 25) * 10;
+            }
+        }
 
         return score;
     }

@@ -220,7 +220,7 @@ public class AlbumController {
     public MusicBrainzReleaseSearchResponse searchAlbums(
             @RequestParam @NotBlank(message = "Title is required") String title
     ) {
-        return musicBrainzClient.searchReleases(title);
+        return catalogService.searchReleasesWithDataset(title);
     }
 
     @PostMapping("/albums")

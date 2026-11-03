@@ -119,6 +119,34 @@ public class CatalogServiceTest {
     }
 
     @Test
+    void shouldFilterOutReleasesNotAvailableInDataset() {
+        String artistId = "mbid-taylor";
+        when(musicBrainzClient.getArtistReleases(artistId))
+                .thenReturn(new MusicBrainzReleaseSearchResponse(3, List.of(
+                        new MusicBrainzRelease("mb-red", "Red (Taylor's Version)", "2021", "US", "Official", 100, 30, Collections.emptyList(), null),
+                        new MusicBrainzRelease("mb-phantom", "Live in Tokyo 2011 (Bootleg Cassette)", "2011", "JP", "Bootleg", 50, 10, Collections.emptyList(), null),
+                        new MusicBrainzRelease("mb-1989", "1989", "2014", "US", "Official", 100, 13, Collections.emptyList(), null)
+                )));
+
+        when(musicBrainzClient.getArtistDetails(artistId))
+                .thenReturn(new MusicBrainzArtist(artistId, "Taylor Swift", "US", null, "Person"));
+
+        // Dataset ONLY has Red and 1989, NOT the bootleg
+        when(jdbcTemplate.queryForList(anyString(), eq("Taylor Swift")))
+                .thenReturn(List.of(
+                        Map.of("album", "Red", "track_count", 16),
+                        Map.of("album", "1989", "track_count", 13)
+                ));
+
+        MusicBrainzReleaseSearchResponse result = catalogService.getArtistReleasesWithDataset(artistId);
+
+        // Phantom bootleg must be filtered out!
+        assertThat(result.releases()).hasSize(2);
+        assertThat(result.releases().stream().map(MusicBrainzRelease::title))
+                .containsExactlyInAnyOrder("Red (Taylor's Version)", "1989");
+    }
+
+    @Test
     void shouldReconcileCompoundMedleyTracksAndMissingTracks() {
         Artist artist = new Artist("Black Sabbath");
         Album album = new Album("Black Sabbath", "mb-bs-1", artist);
@@ -130,7 +158,24 @@ public class CatalogServiceTest {
         Track t5 = new Track("mb-5", "A Bit of Finger / Sleeping Village / Warning", 5, 860000, album);
         List<Track> existing = List.of(t1, t2, t3, t4, t5);
 
-        when(trackRepository.findByAlbumIdOrderByPosition(album.getId())).thenReturn(existing);
+        List<Track> mockDb = new ArrayList<>(existing);
+        when(trackRepository.findByAlbumIdOrderByPosition(album.getId())).thenAnswer(inv -> {
+            List<Track> copy = new ArrayList<>(mockDb);
+            copy.sort(java.util.Comparator.comparing(Track::getPosition, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+            return copy;
+        });
+        org.mockito.Mockito.doAnswer(inv -> {
+            List<Track> toDel = inv.getArgument(0);
+            mockDb.removeAll(toDel);
+            return null;
+        }).when(trackRepository).deleteAll(any());
+        when(trackRepository.saveAll(any())).thenAnswer(inv -> {
+            List<Track> toSave = inv.getArgument(0);
+            for (Track t : toSave) {
+                if (!mockDb.contains(t)) mockDb.add(t);
+            }
+            return toSave;
+        });
 
         List<Map<String, Object>> catalogRows = List.of(
                 Map.of("song_id", "s1", "title", "Black Sabbath (2009 - Remaster)", "duration", 381),
@@ -144,12 +189,9 @@ public class CatalogServiceTest {
         );
         when(jdbcTemplate.queryForList(anyString(), eq("Black Sabbath"), eq("Black Sabbath"))).thenReturn(catalogRows);
 
-        ArgumentCaptor<List<Track>> captor = ArgumentCaptor.forClass(List.class);
-        when(trackRepository.saveAll(captor.capture())).thenAnswer(invocation -> invocation.getArgument(0));
-
         List<Track> reconciled = catalogService.reconcileTracksWithDataset(album);
 
-        verify(trackRepository).deleteAll(existing);
+        verify(trackRepository).deleteAll(List.of(t3, t5));
         assertThat(reconciled).hasSize(8);
 
         List<String> titles = reconciled.stream().map(Track::getTitle).toList();

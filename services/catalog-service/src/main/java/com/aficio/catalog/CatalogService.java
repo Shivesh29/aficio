@@ -393,10 +393,35 @@ public class CatalogService {
     }
 
     public String cleanAlbumTitle(String title) {
+        return cleanAlbumTitleStatic(title);
+    }
+
+    public static String cleanAlbumTitleStatic(String title) {
         if (title == null || title.isBlank()) return "";
-        String s = title.replaceAll("(?i)[\\(\\[\\{].*?(anniversary|deluxe|remaster|expanded|edition|reissue|bonus|special|box\\s*set).*?[\\)\\]\\}]", "");
-        s = s.replaceAll("(?i)\\s*-\\s*(anniversary|deluxe|remaster|expanded|edition|reissue|bonus|special).*", "");
+        String s = title.replaceAll("(?i)[\\(\\[\\{].*?(anniversary|deluxe|remaster|expanded|edition|reissue|bonus|special|box\\s*set|version|taylor's\\s*version).*?[\\)\\]\\}]", "");
+        s = s.replaceAll("(?i)\\s*-\\s*(anniversary|deluxe|remaster|expanded|edition|reissue|bonus|special|version).*", "");
         return s.trim();
+    }
+
+    public static boolean isAlbumMatch(String title1, String title2) {
+        if (title1 == null || title2 == null) return false;
+        String c1 = cleanAlbumTitleStatic(title1).toLowerCase().trim();
+        String c2 = cleanAlbumTitleStatic(title2).toLowerCase().trim();
+        if (c1.equalsIgnoreCase(c2)) return true;
+
+        String a1 = normalizeAlphaNumeric(c1);
+        String a2 = normalizeAlphaNumeric(c2);
+        if (!a1.isEmpty() && a1.equals(a2)) return true;
+
+        if (a1.length() >= 4 && a2.length() >= 4) {
+            if (a1.startsWith(a2) || a2.startsWith(a1)) return true;
+        }
+        return false;
+    }
+
+    private static String normalizeAlphaNumeric(String str) {
+        if (str == null) return "";
+        return str.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
     }
 
     private Map<String, Object> findBestCatalogMatch(String targetCleanTitle, List<Map<String, Object>> catalogRows) {
@@ -534,7 +559,9 @@ public class CatalogService {
                 albumTitle, artistName, existingTracks.size(), catalogRows.size());
 
         if (hasSlashMedley) {
-            List<Track> updatedList = new ArrayList<>();
+            List<Track> medleysToDelete = new ArrayList<>();
+            List<Track> updatedExisting = new ArrayList<>();
+            List<Track> newTracksToAdd = new ArrayList<>();
             Set<String> includedSongIds = new HashSet<>();
             int position = 1;
 
@@ -553,14 +580,16 @@ public class CatalogService {
                                 Integer dur = matchedCat.get("duration") != null ? ((Number) matchedCat.get("duration")).intValue() : null;
                                 Track newTrk = new Track("yt-trk:" + songId, catTitle, position++, dur != null ? dur * 1000 : null, album);
                                 newTrk.setYoutubeVideoId(songId);
-                                updatedList.add(newTrk);
+                                newTracksToAdd.add(newTrk);
                                 anySubMatch = true;
                             }
                         }
                     }
-                    if (!anySubMatch) {
+                    if (anySubMatch) {
+                        medleysToDelete.add(t);
+                    } else {
                         t.setPosition(position++);
-                        updatedList.add(t);
+                        updatedExisting.add(t);
                     }
                 } else {
                     String clean = cleanTrackTitle(origTitle);
@@ -573,7 +602,7 @@ public class CatalogService {
                         }
                     }
                     t.setPosition(position++);
-                    updatedList.add(t);
+                    updatedExisting.add(t);
                 }
             }
 
@@ -585,14 +614,22 @@ public class CatalogService {
                     Integer dur = row.get("duration") != null ? ((Number) row.get("duration")).intValue() : null;
                     Track extraTrk = new Track("yt-trk:" + songId, cleanTitle, position++, dur != null ? dur * 1000 : null, album);
                     extraTrk.setYoutubeVideoId(songId);
-                    updatedList.add(extraTrk);
+                    newTracksToAdd.add(extraTrk);
                     includedSongIds.add(songId);
                 }
             }
 
-            trackRepository.deleteAll(existingTracks);
-            trackRepository.flush();
-            return trackRepository.saveAll(updatedList);
+            if (!medleysToDelete.isEmpty()) {
+                trackRepository.deleteAll(medleysToDelete);
+                trackRepository.flush();
+            }
+            if (!updatedExisting.isEmpty()) {
+                trackRepository.saveAll(updatedExisting);
+            }
+            if (!newTracksToAdd.isEmpty()) {
+                trackRepository.saveAll(newTracksToAdd);
+            }
+            return trackRepository.findByAlbumIdOrderByPosition(album.getId());
         } else {
             Set<String> matchedSongIds = new HashSet<>();
             for (Track t : existingTracks) {
@@ -641,70 +678,103 @@ public class CatalogService {
             log.warn("MusicBrainz artist release lookup failed for [{}]: {}", artistId, ex.getMessage());
         }
 
+        String artistName = null;
+        try {
+            MusicBrainzArtist details = musicBrainzClient.getArtistDetails(artistId);
+            if (details != null && details.name() != null) {
+                artistName = details.name();
+            }
+        } catch (Exception ex) {
+            log.debug("Failed to fetch artist details for MBID {}: {}", artistId, ex.getMessage());
+        }
+
+        if (artistName == null) {
+            Artist localArtist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).orElse(null);
+            if (localArtist != null) {
+                artistName = localArtist.getName();
+            }
+        }
+
+        if (jdbcTemplate == null || artistName == null || artistName.isBlank()) {
+            return mbResponse != null ? mbResponse : new MusicBrainzReleaseSearchResponse(0, Collections.emptyList());
+        }
+
+        // 1. Fetch all albums from youtube_catalog for this artist
+        String sql = "SELECT album, count(*) as track_count FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) GROUP BY album";
+        List<Map<String, Object>> catalogRows = jdbcTemplate.queryForList(sql, artistName);
+        Map<String, Map<String, Object>> catalogMap = new LinkedHashMap<>();
+        for (Map<String, Object> row : catalogRows) {
+            String album = (String) row.get("album");
+            if (album != null && !album.isBlank()) {
+                catalogMap.put(album, row);
+            }
+        }
+
+        // 2. Fetch local synced albums for this artist in Aficio database
+        Set<String> localSyncedAlbumTitles = new HashSet<>();
+        artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).ifPresent(a -> {
+            List<Album> existing = albumRepository.findByArtistId(a.getId());
+            for (Album alb : existing) {
+                if (alb.getTitle() != null && !alb.getTitle().isBlank()) {
+                    localSyncedAlbumTitles.add(alb.getTitle());
+                }
+            }
+        });
+
         List<MusicBrainzRelease> combined = new ArrayList<>();
+        Set<String> matchedCatalogAlbumNames = new HashSet<>();
         Set<String> seenNormTitles = new HashSet<>();
 
+        // 3. Filter MusicBrainz releases: ONLY populate and make available releases available in dataset or local DB
         if (mbResponse != null && mbResponse.releases() != null) {
             for (MusicBrainzRelease rel : mbResponse.releases()) {
-                combined.add(rel);
-                if (rel.title() != null) {
-                    seenNormTitles.add(normalizeTitle(rel.title()));
+                if (rel == null || rel.title() == null || rel.title().isBlank()) continue;
+
+                String matchedCatalogAlbum = findCatalogAlbumMatch(rel.title(), catalogMap.keySet(), localSyncedAlbumTitles);
+                if (matchedCatalogAlbum != null) {
+                    String norm = normalizeTitle(rel.title());
+                    if (seenNormTitles.add(norm)) {
+                        combined.add(rel);
+                        if (!matchedCatalogAlbum.isEmpty()) {
+                            matchedCatalogAlbumNames.add(matchedCatalogAlbum);
+                        }
+                    }
                 }
             }
         }
 
-        if (jdbcTemplate != null) {
-            String artistName = null;
-            try {
-                MusicBrainzArtist details = musicBrainzClient.getArtistDetails(artistId);
-                if (details != null && details.name() != null) {
-                    artistName = details.name();
-                }
-            } catch (Exception ex) {
-                log.debug("Failed to fetch artist details for MBID {}: {}", artistId, ex.getMessage());
-            }
+        // 4. Add dataset-exclusive releases present in youtube_catalog that were not covered by MusicBrainz
+        for (Map.Entry<String, Map<String, Object>> entry : catalogMap.entrySet()) {
+            String catAlbum = entry.getKey();
+            if (!matchedCatalogAlbumNames.contains(catAlbum)) {
+                String norm = normalizeTitle(catAlbum);
+                if (seenNormTitles.add(norm)) {
+                    Map<String, Object> row = entry.getValue();
+                    int trackCount = row.get("track_count") != null ? ((Number) row.get("track_count")).intValue() : 1;
+                    String syntheticId = "yt-" + Base64.getUrlEncoder().withoutPadding().encodeToString((artistName + "::" + catAlbum).getBytes(StandardCharsets.UTF_8));
+                    String pType = trackCount >= 5 ? "Album" : (trackCount >= 2 ? "EP" : "Single");
 
-            if (artistName == null) {
-                Artist localArtist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).orElse(null);
-                if (localArtist != null) {
-                    artistName = localArtist.getName();
-                }
-            }
-
-            if (artistName != null && !artistName.isBlank()) {
-                String sql = "SELECT album, count(*) as track_count FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) GROUP BY album";
-                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, artistName);
-                for (Map<String, Object> row : rows) {
-                    String album = (String) row.get("album");
-                    if (album == null || album.isBlank()) continue;
-                    String norm = normalizeTitle(album);
-                    if (seenNormTitles.add(norm)) {
-                        int trackCount = row.get("track_count") != null ? ((Number) row.get("track_count")).intValue() : 1;
-                        String syntheticId = "yt-" + Base64.getUrlEncoder().withoutPadding().encodeToString((artistName + "::" + album).getBytes(StandardCharsets.UTF_8));
-                        String pType = trackCount >= 5 ? "Album" : (trackCount >= 2 ? "EP" : "Single");
-
-                        MusicBrainzReleaseGroup rg = new MusicBrainzReleaseGroup(
-                                null,
-                                album,
-                                pType,
-                                null,
-                                null,
-                                null,
-                                null
-                        );
-                        MusicBrainzRelease rel = new MusicBrainzRelease(
-                                syntheticId,
-                                album,
-                                null,
-                                "XW",
-                                "Official",
-                                95,
-                                trackCount,
-                                List.of(new MusicBrainzArtistCredit(artistName, new MusicBrainzArtistReference(artistId, artistName))),
-                                rg
-                        );
-                        combined.add(rel);
-                    }
+                    MusicBrainzReleaseGroup rg = new MusicBrainzReleaseGroup(
+                            null,
+                            catAlbum,
+                            pType,
+                            null,
+                            null,
+                            null,
+                            null
+                    );
+                    MusicBrainzRelease rel = new MusicBrainzRelease(
+                            syntheticId,
+                            catAlbum,
+                            null,
+                            "XW",
+                            "Official",
+                            95,
+                            trackCount,
+                            List.of(new MusicBrainzArtistCredit(artistName, new MusicBrainzArtistReference(artistId, artistName))),
+                            rg
+                    );
+                    combined.add(rel);
                 }
             }
         }
@@ -712,7 +782,29 @@ public class CatalogService {
         return new MusicBrainzReleaseSearchResponse(combined.size(), combined);
     }
 
+    private String findCatalogAlbumMatch(String mbTitle, Set<String> catalogAlbumNames, Set<String> localSyncedAlbumTitles) {
+        if (mbTitle == null || mbTitle.isBlank()) return null;
+
+        for (String local : localSyncedAlbumTitles) {
+            if (isAlbumMatch(mbTitle, local)) {
+                return "";
+            }
+        }
+
+        for (String cat : catalogAlbumNames) {
+            if (isAlbumMatch(mbTitle, cat)) {
+                return cat;
+            }
+        }
+
+        return null;
+    }
+
     public MusicBrainzReleaseSearchResponse searchReleasesWithDataset(String query) {
+        if (query == null || query.isBlank()) {
+            return new MusicBrainzReleaseSearchResponse(0, Collections.emptyList());
+        }
+
         MusicBrainzReleaseSearchResponse mbResponse = null;
         try {
             mbResponse = musicBrainzClient.searchReleases(query);
@@ -722,17 +814,11 @@ public class CatalogService {
 
         List<MusicBrainzRelease> combined = new ArrayList<>();
         Set<String> seenKeys = new HashSet<>();
+        Set<String> coveredCatalogKeys = new HashSet<>();
 
-        if (mbResponse != null && mbResponse.releases() != null) {
-            for (MusicBrainzRelease rel : mbResponse.releases()) {
-                combined.add(rel);
-                String aName = rel.artistCredit() != null && !rel.artistCredit().isEmpty()
-                        ? rel.artistCredit().get(0).name() : "";
-                seenKeys.add(normalizeTitle(aName) + "::" + normalizeTitle(rel.title()));
-            }
-        }
-
-        if (jdbcTemplate != null && query != null && !query.isBlank()) {
+        // 1. Fetch matching albums from youtube_catalog
+        List<Map<String, Object>> catalogRows = Collections.emptyList();
+        if (jdbcTemplate != null) {
             String sql = """
                 SELECT artist, album, count(*) as track_count
                 FROM youtube_catalog
@@ -740,50 +826,96 @@ public class CatalogService {
                    OR LOWER(album) LIKE LOWER(?)
                    OR LOWER(artist) = LOWER(?)
                 GROUP BY artist, album
-                LIMIT 15
+                ORDER BY (CASE WHEN LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), count(*) DESC
+                LIMIT 25
             """;
             try {
-                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, query.trim(), query.trim() + "%", query.trim());
-                for (Map<String, Object> row : rows) {
-                    String artist = (String) row.get("artist");
-                    String album = (String) row.get("album");
-                    if (artist == null || album == null || album.isBlank()) continue;
+                catalogRows = jdbcTemplate.queryForList(sql, query.trim(), query.trim() + "%", query.trim(), query.trim());
+            } catch (Exception ex) {
+                log.warn("youtube_catalog album search failed for [{}]: {}", query, ex.getMessage());
+            }
+        }
 
-                    String key = normalizeTitle(artist) + "::" + normalizeTitle(album);
-                    if (seenKeys.add(key)) {
-                        int trackCount = row.get("track_count") != null ? ((Number) row.get("track_count")).intValue() : 1;
-                        String syntheticId = "yt-" + Base64.getUrlEncoder().withoutPadding().encodeToString((artist + "::" + album).getBytes(StandardCharsets.UTF_8));
-                        String pType = trackCount >= 5 ? "Album" : (trackCount >= 2 ? "EP" : "Single");
+        // 2. Fetch any matching local synced albums in DB
+        List<Album> localAlbums = Collections.emptyList();
+        try {
+            localAlbums = albumRepository.findByTitleContainingIgnoreCase(query.trim());
+        } catch (Exception ignored) {}
 
-                        MusicBrainzReleaseGroup rg = new MusicBrainzReleaseGroup(
-                                null,
-                                album,
-                                pType,
-                                null,
-                                null,
-                                null,
-                                null
-                        );
-                        MusicBrainzRelease rel = new MusicBrainzRelease(
-                                syntheticId,
-                                album,
-                                null,
-                                "XW",
-                                "Official",
-                                95,
-                                trackCount,
-                                List.of(new MusicBrainzArtistCredit(artist, new MusicBrainzArtistReference(null, artist))),
-                                rg
-                        );
-                        if (query.trim().equalsIgnoreCase(album) || query.trim().equalsIgnoreCase(artist)) {
-                            combined.add(0, rel);
-                        } else {
-                            combined.add(rel);
+        // 3. For each MusicBrainz search result, ONLY keep it if it is available in youtube_catalog or local DB
+        if (mbResponse != null && mbResponse.releases() != null) {
+            for (MusicBrainzRelease rel : mbResponse.releases()) {
+                if (rel == null || rel.title() == null || rel.title().isBlank()) continue;
+                String aName = rel.artistCredit() != null && !rel.artistCredit().isEmpty()
+                        ? rel.artistCredit().get(0).name() : "";
+
+                boolean matched = false;
+                for (Album la : localAlbums) {
+                    if (isAlbumMatch(rel.title(), la.getTitle())) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    for (Map<String, Object> crow : catalogRows) {
+                        String cArtist = (String) crow.get("artist");
+                        String cAlbum = (String) crow.get("album");
+                        if (cAlbum != null && isAlbumMatch(rel.title(), cAlbum)) {
+                            if (aName.isBlank() || cArtist == null || aName.equalsIgnoreCase(cArtist) || isAlbumMatch(aName, cArtist)) {
+                                matched = true;
+                                coveredCatalogKeys.add(normalizeTitle(cArtist) + "::" + normalizeTitle(cAlbum));
+                                break;
+                            }
                         }
                     }
                 }
-            } catch (Exception ex) {
-                log.warn("youtube_catalog album search failed for [{}]: {}", query, ex.getMessage());
+
+                if (matched) {
+                    String key = normalizeTitle(aName) + "::" + normalizeTitle(rel.title());
+                    if (seenKeys.add(key)) {
+                        combined.add(rel);
+                    }
+                }
+            }
+        }
+
+        // 4. For any catalog rows not covered by MusicBrainz releases, add synthetic releases
+        for (Map<String, Object> row : catalogRows) {
+            String artist = (String) row.get("artist");
+            String album = (String) row.get("album");
+            if (artist == null || album == null || album.isBlank()) continue;
+
+            String key = normalizeTitle(artist) + "::" + normalizeTitle(album);
+            if (!coveredCatalogKeys.contains(key) && seenKeys.add(key)) {
+                int trackCount = row.get("track_count") != null ? ((Number) row.get("track_count")).intValue() : 1;
+                String syntheticId = "yt-" + Base64.getUrlEncoder().withoutPadding().encodeToString((artist + "::" + album).getBytes(StandardCharsets.UTF_8));
+                String pType = trackCount >= 5 ? "Album" : (trackCount >= 2 ? "EP" : "Single");
+
+                MusicBrainzReleaseGroup rg = new MusicBrainzReleaseGroup(
+                        null,
+                        album,
+                        pType,
+                        null,
+                        null,
+                        null,
+                        null
+                );
+                MusicBrainzRelease rel = new MusicBrainzRelease(
+                        syntheticId,
+                        album,
+                        null,
+                        "XW",
+                        "Official",
+                        95,
+                        trackCount,
+                        List.of(new MusicBrainzArtistCredit(artist, new MusicBrainzArtistReference(null, artist))),
+                        rg
+                );
+                if (query.trim().equalsIgnoreCase(album) || query.trim().equalsIgnoreCase(artist)) {
+                    combined.add(0, rel);
+                } else {
+                    combined.add(rel);
+                }
             }
         }
 

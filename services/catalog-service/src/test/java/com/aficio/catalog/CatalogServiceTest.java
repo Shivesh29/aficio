@@ -241,4 +241,28 @@ public class CatalogServiceTest {
         assertThat(savedTracks.get(0).getTitle()).isEqualTo("Good Luck, Babe!");
         assertThat(savedTracks.get(0).getYoutubeVideoId()).isEqualTo("VZ-oGLluGAc");
     }
+
+    @Test
+    void shouldFilterOutArtistsWithNoReleasesInDataset() {
+        String query = "Ghost";
+        when(musicBrainzClient.searchArtists(query)).thenReturn(
+                new com.aficio.musicbrainz.MusicBrainzSearchResponse(2, List.of(
+                        new MusicBrainzArtist("mb-ghost-band", "Ghost", "SE", "Swedish rock band", "Group"),
+                        new MusicBrainzArtist("mb-ghost-empty", "Ghost (No Catalog)", "US", "unindexed project", "Group")
+                ))
+        );
+
+        // "Ghost" is in dataset, "Ghost (No Catalog)" is NOT
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), eq("Ghost")))
+                .thenReturn(List.of(1));
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), eq("Ghost (No Catalog)")))
+                .thenReturn(Collections.emptyList());
+        when(artistRepository.findFirstByNameOrderByIdAsc("Ghost (No Catalog)"))
+                .thenReturn(Optional.empty());
+
+        com.aficio.musicbrainz.MusicBrainzSearchResponse result = catalogService.searchArtistsWithDataset(query);
+
+        assertThat(result.artists()).hasSize(1);
+        assertThat(result.artists().get(0).name()).isEqualTo("Ghost");
+    }
 }

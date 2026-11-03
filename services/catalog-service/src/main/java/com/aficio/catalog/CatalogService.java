@@ -24,6 +24,7 @@ import com.aficio.musicbrainz.MusicBrainzRecording;
 import com.aficio.musicbrainz.MusicBrainzRelease;
 import com.aficio.musicbrainz.MusicBrainzReleaseDetails;
 import com.aficio.musicbrainz.MusicBrainzReleaseSearchResponse;
+import com.aficio.musicbrainz.MusicBrainzSearchResponse;
 import com.aficio.musicbrainz.MusicBrainzTrack;
 import com.aficio.track.Track;
 import com.aficio.track.TrackRepository;
@@ -672,26 +673,33 @@ public class CatalogService {
 
     public MusicBrainzReleaseSearchResponse getArtistReleasesWithDataset(String artistId) {
         MusicBrainzReleaseSearchResponse mbResponse = null;
-        try {
-            mbResponse = musicBrainzClient.getArtistReleases(artistId);
-        } catch (Exception ex) {
-            log.warn("MusicBrainz artist release lookup failed for [{}]: {}", artistId, ex.getMessage());
-        }
-
         String artistName = null;
-        try {
-            MusicBrainzArtist details = musicBrainzClient.getArtistDetails(artistId);
-            if (details != null && details.name() != null) {
-                artistName = details.name();
-            }
-        } catch (Exception ex) {
-            log.debug("Failed to fetch artist details for MBID {}: {}", artistId, ex.getMessage());
-        }
 
-        if (artistName == null) {
-            Artist localArtist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).orElse(null);
-            if (localArtist != null) {
-                artistName = localArtist.getName();
+        if (artistId != null && artistId.startsWith("yt-art-")) {
+            try {
+                artistName = new String(Base64.getUrlDecoder().decode(artistId.substring(7)), StandardCharsets.UTF_8);
+            } catch (Exception ignored) {}
+        } else {
+            try {
+                mbResponse = musicBrainzClient.getArtistReleases(artistId);
+            } catch (Exception ex) {
+                log.warn("MusicBrainz artist release lookup failed for [{}]: {}", artistId, ex.getMessage());
+            }
+
+            try {
+                MusicBrainzArtist details = musicBrainzClient.getArtistDetails(artistId);
+                if (details != null && details.name() != null) {
+                    artistName = details.name();
+                }
+            } catch (Exception ex) {
+                log.debug("Failed to fetch artist details for MBID {}: {}", artistId, ex.getMessage());
+            }
+
+            if (artistName == null) {
+                Artist localArtist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).orElse(null);
+                if (localArtist != null) {
+                    artistName = localArtist.getName();
+                }
             }
         }
 
@@ -920,6 +928,95 @@ public class CatalogService {
         }
 
         return new MusicBrainzReleaseSearchResponse(combined.size(), combined);
+    }
+
+    public MusicBrainzSearchResponse searchArtistsWithDataset(String query) {
+        if (query == null || query.isBlank()) {
+            return new MusicBrainzSearchResponse(0, Collections.emptyList());
+        }
+
+        MusicBrainzSearchResponse mbResponse = null;
+        try {
+            mbResponse = musicBrainzClient.searchArtists(query);
+        } catch (Exception ex) {
+            log.warn("MusicBrainz artist search failed for [{}]: {}", query, ex.getMessage());
+        }
+
+        List<MusicBrainzArtist> filtered = new ArrayList<>();
+        Set<String> seenNames = new HashSet<>();
+
+        if (jdbcTemplate != null) {
+            // Check MusicBrainz artists: ONLY keep those who have tracks in youtube_catalog or local DB
+            if (mbResponse != null && mbResponse.artists() != null) {
+                for (MusicBrainzArtist a : mbResponse.artists()) {
+                    if (a == null || a.name() == null || a.name().isBlank()) continue;
+                    if (isArtistAvailable(a.name())) {
+                        if (seenNames.add(a.name().toLowerCase().trim())) {
+                            filtered.add(a);
+                        }
+                    }
+                }
+            }
+
+            // Also check youtube_catalog directly for matching artists (prefix / exact)
+            String sql = """
+                SELECT DISTINCT artist
+                FROM youtube_catalog
+                WHERE LOWER(artist) = LOWER(?)
+                   OR LOWER(artist) LIKE LOWER(?)
+                LIMIT 10
+            """;
+            try {
+                List<String> catArtists = jdbcTemplate.query(
+                        sql,
+                        (rs, rowNum) -> rs.getString("artist"),
+                        query.trim(), query.trim() + "%"
+                );
+                for (String catArtist : catArtists) {
+                    if (catArtist != null && !catArtist.isBlank()) {
+                        if (seenNames.add(catArtist.toLowerCase().trim())) {
+                            String syntheticId = "yt-art-" + Base64.getUrlEncoder().withoutPadding()
+                                    .encodeToString(catArtist.getBytes(StandardCharsets.UTF_8));
+                            filtered.add(new MusicBrainzArtist(
+                                    syntheticId,
+                                    catArtist,
+                                    null,
+                                    "Dataset Catalog Artist",
+                                    "Person/Group"
+                            ));
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("youtube_catalog artist search failed for [{}]: {}", query, ex.getMessage());
+            }
+
+            return new MusicBrainzSearchResponse(filtered.size(), filtered);
+        }
+
+        return mbResponse != null ? mbResponse : new MusicBrainzSearchResponse(0, Collections.emptyList());
+    }
+
+    public boolean isArtistAvailable(String artistName) {
+        if (artistName == null || artistName.isBlank()) return false;
+        if (jdbcTemplate != null) {
+            try {
+                String sql = "SELECT 1 FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) LIMIT 1";
+                List<Integer> list = jdbcTemplate.query(sql, (rs, rowNum) -> 1, artistName.trim());
+                if (!list.isEmpty()) {
+                    return true;
+                }
+            } catch (Exception ex) {
+                log.debug("isArtistAvailable check failed for [{}]: {}", artistName, ex.getMessage());
+            }
+        }
+        try {
+            return artistRepository.findFirstByNameOrderByIdAsc(artistName.trim())
+                    .map(a -> !albumRepository.findByArtistId(a.getId()).isEmpty())
+                    .orElse(false);
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
 }

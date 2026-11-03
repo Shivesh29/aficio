@@ -72,9 +72,6 @@ export const ArtistPage = () => {
           const raw = releasesRes.value.releases || [];
           const rels = raw.filter((r) => r.title && (r['track-count'] === undefined || r['track-count'] > 0));
           setReleases(rels);
-          if (rels.length === 0) {
-            setError('No releases found for this artist.');
-          }
         } else if (releasesRes.status === 'rejected') {
           setError(
             releasesRes.reason instanceof Error
@@ -259,8 +256,14 @@ export const ArtistPage = () => {
         )}
 
         {!loading && filteredReleases.length === 0 && !error && (
-          <div className="empty-state-container">
-            <p>No releases matched your filter.</p>
+          <div className="empty-state-container" style={{ padding: '3.5rem 1rem', textAlign: 'center' }}>
+            <Disc size={44} className="text-secondary" style={{ opacity: 0.35, margin: '0 auto 1rem', display: 'block' }} />
+            <h3 style={{ fontSize: '1.15rem', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+              No releases available for this artist
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '440px', margin: '0 auto' }}>
+              Releases will appear here once audio tracks are added to the dataset or indexed into the catalog.
+            </p>
           </div>
         )}
 

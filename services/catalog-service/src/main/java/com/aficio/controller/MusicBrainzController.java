@@ -34,7 +34,7 @@ public class MusicBrainzController {
     public MusicBrainzSearchResponse searchArtists(
             @RequestParam String name
     ) {
-        return musicBrainzClient.searchArtists(name);
+        return catalogService.searchArtistsWithDataset(name);
     }
 
     @GetMapping("/musicbrainz/artists/{artistId}/releases")
@@ -48,6 +48,12 @@ public class MusicBrainzController {
     public MusicBrainzArtist getArtistDetails(
             @PathVariable String artistId
     ) {
+        if (artistId != null && artistId.startsWith("yt-art-")) {
+            try {
+                String decodedName = new String(java.util.Base64.getUrlDecoder().decode(artistId.substring(7)), java.nio.charset.StandardCharsets.UTF_8);
+                return new MusicBrainzArtist(artistId, decodedName, null, "Catalog Artist", "Person/Group");
+            } catch (Exception ignored) {}
+        }
         return musicBrainzClient.getArtistDetails(artistId);
     }
 
@@ -57,7 +63,7 @@ public class MusicBrainzController {
             @RequestParam(defaultValue = "album") String type
     ) {
         return switch (type.toLowerCase()) {
-            case "artist" -> musicBrainzClient.searchArtists(query);
+            case "artist" -> catalogService.searchArtistsWithDataset(query);
             case "artist-releases" -> catalogService.getArtistReleasesWithDataset(query);
             case "album" -> catalogService.searchReleasesWithDataset(query);
             case "track" -> musicBrainzClient.searchRecordings(query);

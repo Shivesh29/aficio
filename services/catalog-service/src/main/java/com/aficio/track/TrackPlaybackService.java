@@ -525,8 +525,43 @@ public class TrackPlaybackService {
                 track.setYoutubeVideoId(null);
                 trackRepository.save(track);
                 log.info("Invalidated restricted YouTube video ID [{}] for track [{}] ({})", badId, track.getId(), track.getTitle());
+
+                // 1. Purge from youtube_catalog so 12M cache doesn't re-serve the restricted ID
+                if (jdbcTemplate != null) {
+                    try {
+                        int purged = jdbcTemplate.update("DELETE FROM youtube_catalog WHERE song_id = ?", badId);
+                        if (purged > 0) {
+                            log.info("Purged restricted video ID [{}] from youtube_catalog ({} rows deleted)", badId, purged);
+                        }
+                    } catch (Exception ex) {
+                        log.warn("Failed to purge restricted ID [{}] from youtube_catalog: {}", badId, ex.getMessage());
+                    }
+                }
+
+                // 2. Blacklist in Redis to prevent playlist auto-discovery from re-infecting tracks
+                if (stringRedisTemplate != null) {
+                    try {
+                        stringRedisTemplate.opsForSet().add("blacklist:youtube_restricted", badId);
+                        log.info("Blacklisted restricted video ID [{}] in Redis", badId);
+                    } catch (Exception ex) {
+                        log.warn("Failed to add restricted ID [{}] to Redis blacklist: {}", badId, ex.getMessage());
+                    }
+                }
             }
         });
+    }
+
+    public boolean isRestrictedVideoId(String videoId) {
+        if (videoId == null || videoId.isBlank()) return false;
+        if (stringRedisTemplate != null) {
+            try {
+                Boolean member = stringRedisTemplate.opsForSet().isMember("blacklist:youtube_restricted", videoId);
+                return Boolean.TRUE.equals(member);
+            } catch (Exception ex) {
+                log.debug("Redis blacklist check failed for [{}]: {}", videoId, ex.getMessage());
+            }
+        }
+        return false;
     }
 
     /**
@@ -910,8 +945,12 @@ public class TrackPlaybackService {
                 Track t = albumTracks.get(i);
                 PlaylistItem item = workingPlaylistItems.get(i);
                 if (isTrackTitleMatch(t.getTitle(), item.title(), artistName, album.getTitle())) {
-                    trackToVideoMap.put(t.getId(), item.videoId());
-                    usedVideoIds.add(item.videoId());
+                    if (!isRestrictedVideoId(item.videoId())) {
+                        trackToVideoMap.put(t.getId(), item.videoId());
+                        usedVideoIds.add(item.videoId());
+                    } else {
+                        log.warn("Skipping blacklisted restricted video ID [{}] for track [{}] ({})", item.videoId(), t.getId(), t.getTitle());
+                    }
                 }
             }
 
@@ -920,9 +959,13 @@ public class TrackPlaybackService {
                 if (trackToVideoMap.containsKey(t.getId())) continue;
                 for (PlaylistItem item : workingPlaylistItems) {
                     if (!usedVideoIds.contains(item.videoId()) && isTrackTitleMatch(t.getTitle(), item.title(), artistName, album.getTitle())) {
-                        trackToVideoMap.put(t.getId(), item.videoId());
-                        usedVideoIds.add(item.videoId());
-                        break;
+                        if (!isRestrictedVideoId(item.videoId())) {
+                            trackToVideoMap.put(t.getId(), item.videoId());
+                            usedVideoIds.add(item.videoId());
+                            break;
+                        } else {
+                            log.warn("Skipping blacklisted restricted video ID [{}] for track [{}] ({})", item.videoId(), t.getId(), t.getTitle());
+                        }
                     }
                 }
             }

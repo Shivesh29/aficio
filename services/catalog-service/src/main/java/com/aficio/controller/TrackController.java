@@ -170,6 +170,12 @@ public class TrackController {
         return org.springframework.http.ResponseEntity.ok().build();
     }
 
+    @PostMapping("/tracks/{id}/report-restricted")
+    public org.springframework.http.ResponseEntity<Void> reportRestrictedTrack(@PathVariable Long id) {
+        trackPlaybackService.invalidateRestrictedYoutubeVideoId(id);
+        return org.springframework.http.ResponseEntity.ok().build();
+    }
+
     @PostMapping("/tracks/import")
     public List<TrackResponse> importTracks(
             @RequestParam Long albumId,

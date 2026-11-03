@@ -516,6 +516,19 @@ public class TrackPlaybackService {
         });
     }
 
+    @Transactional
+    public void invalidateRestrictedYoutubeVideoId(Long trackId) {
+        if (trackId == null) return;
+        trackRepository.findById(trackId).ifPresent(track -> {
+            String badId = track.getYoutubeVideoId();
+            if (badId != null && !badId.isBlank()) {
+                track.setYoutubeVideoId(null);
+                trackRepository.save(track);
+                log.info("Invalidated restricted YouTube video ID [{}] for track [{}] ({})", badId, track.getId(), track.getTitle());
+            }
+        });
+    }
+
     /**
      * Resolves YouTube video ID from MusicBrainz recording URL relations.
      * If the track's musicBrainzId was stored as a track MBID rather than a recording MBID,

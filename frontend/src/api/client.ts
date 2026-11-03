@@ -429,6 +429,10 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ youtubeVideoId }),
       }),
+    reportTrackRestricted: (trackId: number | string) =>
+      request<void>(`/tracks/${trackId}/report-restricted`, {
+        method: 'POST',
+      }),
     syncAlbum: (musicBrainzId: string) =>
       request<Album>(`/albums/${musicBrainzId}/sync`, { method: 'POST' }),
     searchMusicBrainz: (query: string, type: 'album' | 'artist' | 'track' | 'artist-releases') =>

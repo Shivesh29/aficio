@@ -169,16 +169,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsQueueOpen((prev) => !prev);
   }, []);
 
-  // Auto advance guard & references
+  // Auto advance guard, consecutive error limiter & references
   const isAdvancingRef = useRef<boolean>(false);
-  const nextTrackRef = useRef<() => Promise<void>>(async () => {});
+  const consecutiveErrorsRef = useRef<number>(0);
+  const nextTrackRef = useRef<(isErrorSkip?: boolean) => Promise<void>>(async () => {});
 
-  const handleTrackEnded = useCallback(() => {
+  const handleTrackEnded = useCallback((isError: boolean = false) => {
     if (isAdvancingRef.current) return;
     isAdvancingRef.current = true;
 
-    console.log('[Aficio Player] Track ended -> Auto-playing next track in album/queue ⏭️');
-    nextTrackRef.current().finally(() => {
+    console.log(`[Aficio Player] Track advance triggered (isError: ${isError}) ⏭️`);
+    nextTrackRef.current(isError).finally(() => {
       setTimeout(() => {
         isAdvancingRef.current = false;
       }, 1500);
@@ -330,7 +331,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [sendIframeCommand]);
 
-  const nextTrack = useCallback(async () => {
+  const nextTrack = useCallback(async (isErrorSkip: boolean = false) => {
     const q = queueRef.current;
     if (!q || q.length === 0) return;
 
@@ -341,6 +342,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
     }
     const safeIdx = idx >= 0 ? idx : 0;
+
+    // Prevent endless wrap-around loop when auto-skipping failed/restricted tracks
+    if (isErrorSkip && safeIdx + 1 >= q.length) {
+      console.log('[Aficio Player] Reached end of album during auto-skip, halting playback.');
+      setIsPlaying(false);
+      isAdvancingRef.current = false;
+      setError('Reached the end of the album. Unplayable tracks were skipped.');
+      return;
+    }
+
     const nextIdx = (safeIdx + 1) % q.length;
     const nextItem = q[nextIdx];
 
@@ -431,9 +442,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         if (detectedState === 1) {
-          // 1 = playing
+          // 1 = playing -> successfully playing, reset consecutive error counter
           setIsPlaying(true);
           setIsLoading(false);
+          consecutiveErrorsRef.current = 0;
         } else if (detectedState === 2) {
           // 2 = paused
           setIsPlaying(false);
@@ -441,17 +453,36 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // 0 = ended -> trigger autoplay to next track
           console.log('[Aficio Player] Track ended event received from YouTube (state 0). Auto-playing next track...');
           setIsPlaying(false);
-          handleTrackEnded();
+          handleTrackEnded(false);
         }
 
         if (data.event === 'onError') {
           console.warn('[Aficio Player] YouTube Player error:', data.info);
           setIsPlaying(false);
-          setError('This track is restricted by YouTube or the copyright owner.');
+
+          // Invalidate restricted track ID on the backend so it doesn't linger in cache
+          const activeTrackId = currentTrackIdRef.current;
+          if (activeTrackId) {
+            api.catalog.reportTrackRestricted(activeTrackId).catch(() => {});
+          }
+
+          consecutiveErrorsRef.current += 1;
+          const q = queueRef.current;
+          const maxConsecutive = q && q.length > 0 ? Math.min(q.length, 3) : 3;
+
+          // Break the infinite loop if multiple consecutive tracks are restricted/unplayable
+          if (consecutiveErrorsRef.current >= maxConsecutive) {
+            console.warn(`[Aficio Player] Halting playback loop: ${consecutiveErrorsRef.current} consecutive tracks restricted from embedding.`);
+            setError('Playback stopped: Multiple tracks on this album are restricted by YouTube or the copyright owner from embedded playback.');
+            isAdvancingRef.current = false;
+            return;
+          }
+
+          setError('This track is restricted by YouTube or the copyright owner. Skipping...');
           // Auto-skip unplayable track after brief pause so album playback keeps flowing
           setTimeout(() => {
-            handleTrackEnded();
-          }, 2000);
+            handleTrackEnded(true);
+          }, 1500);
         } else if (data.info) {
           if (typeof data.info.currentTime === 'number') {
             setCurrentTime(Math.floor(data.info.currentTime));

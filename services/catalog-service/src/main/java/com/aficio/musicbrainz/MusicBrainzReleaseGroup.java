@@ -12,7 +12,19 @@ public record MusicBrainzReleaseGroup(
         @JsonProperty("secondary-types") List<String> secondaryTypes,
         @JsonProperty("first-release-date") String firstReleaseDate,
         String disambiguation,
-        List<MusicBrainzRelation> relations
+        List<MusicBrainzRelation> relations,
+        List<MusicBrainzRelease> releases
 ) {
+    public MusicBrainzReleaseGroup(
+            String id,
+            String title,
+            String primaryType,
+            List<String> secondaryTypes,
+            String firstReleaseDate,
+            String disambiguation,
+            List<MusicBrainzRelation> relations
+    ) {
+        this(id, title, primaryType, secondaryTypes, firstReleaseDate, disambiguation, relations, null);
+    }
 }
 

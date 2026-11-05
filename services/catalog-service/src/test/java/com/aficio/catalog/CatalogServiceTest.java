@@ -6,8 +6,12 @@ import com.aficio.artist.Artist;
 import com.aficio.artist.ArtistRepository;
 import com.aficio.coverart.CoverArtClient;
 import com.aficio.musicbrainz.MusicBrainzArtist;
+import com.aficio.musicbrainz.MusicBrainzArtistCredit;
+import com.aficio.musicbrainz.MusicBrainzArtistReference;
 import com.aficio.musicbrainz.MusicBrainzClient;
 import com.aficio.musicbrainz.MusicBrainzRelease;
+import com.aficio.musicbrainz.MusicBrainzReleaseDetails;
+import com.aficio.musicbrainz.MusicBrainzReleaseGroup;
 import com.aficio.musicbrainz.MusicBrainzReleaseSearchResponse;
 import com.aficio.track.Track;
 import com.aficio.track.TrackRepository;
@@ -32,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -264,5 +269,54 @@ public class CatalogServiceTest {
 
         assertThat(result.artists()).hasSize(1);
         assertThat(result.artists().get(0).name()).isEqualTo("Ghost");
+    }
+
+    @Test
+    void shouldShortCircuitSyncAlbumWhenAlbumAlreadyExistsWithTracks() {
+        String mbid = "4e376d35-2492-43eb-80ba-88f36ca59c2d";
+        Artist artist = new Artist("Taylor Swift");
+        Album existing = new Album("evermore", mbid, artist);
+
+        when(albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(mbid)).thenReturn(Optional.of(existing));
+        when(trackRepository.countByAlbumId(existing.getId())).thenReturn(17L);
+
+        Album result = catalogService.syncAlbum(mbid);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getTitle()).isEqualTo("evermore");
+        // Ensure no external call to MusicBrainz was made
+        verify(musicBrainzClient, never()).getReleaseDetails(anyString());
+    }
+
+    @Test
+    void shouldResolveReleaseGroupIdToCanonicalReleaseAndMatchExistingAlbum() {
+        String releaseGroupId = "e86d6219-f5a2-4edd-bf2b-3f9eab190ae0";
+        String canonicalReleaseId = "4e376d35-2492-43eb-80ba-88f36ca59c2d";
+
+        Artist artist = new Artist("Taylor Swift");
+        Album existingCanonical = new Album("evermore", canonicalReleaseId, artist);
+
+        // Not found by release group ID
+        when(albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(releaseGroupId)).thenReturn(Optional.empty());
+
+        // MusicBrainz resolves the release group to canonical release
+        MusicBrainzReleaseDetails details = new MusicBrainzReleaseDetails(
+                canonicalReleaseId,
+                "evermore",
+                List.of(new MusicBrainzArtistCredit("Taylor Swift", new MusicBrainzArtistReference("mb-taylor", "Taylor Swift"))),
+                Collections.emptyList(),
+                new MusicBrainzReleaseGroup(releaseGroupId, "evermore", "Album", null, null, null, null)
+        );
+        when(musicBrainzClient.getReleaseDetails(releaseGroupId)).thenReturn(details);
+
+        // Found by canonical release ID and has tracks
+        when(albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(canonicalReleaseId)).thenReturn(Optional.of(existingCanonical));
+        when(trackRepository.countByAlbumId(existingCanonical.getId())).thenReturn(17L);
+
+        Album result = catalogService.syncAlbum(releaseGroupId);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getTitle()).isEqualTo("evermore");
+        assertThat(result.getMusicBrainzId()).isEqualTo(canonicalReleaseId);
     }
 }

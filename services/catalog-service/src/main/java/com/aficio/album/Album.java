@@ -46,6 +46,10 @@ public class Album {
         return musicBrainzId;
     }
 
+    public void setMusicBrainzId(String musicBrainzId) {
+        this.musicBrainzId = musicBrainzId;
+    }
+
     public String getCoverArtUrl() {
         return coverArtUrl;
     }

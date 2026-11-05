@@ -7,6 +7,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
@@ -75,6 +76,9 @@ public class MusicBrainzClient {
                 throttle();
                 return action.get();
             } catch (Exception ex) {
+                if (ex instanceof HttpStatusCodeException statusEx && statusEx.getStatusCode().value() == 404) {
+                    throw ex;
+                }
                 if (attempts >= MAX_RETRIES) {
                     log.error("MusicBrainz request failed after {} attempts for [{}]: {}", attempts, operationDescription, ex.getMessage());
                     throw ex;
@@ -185,14 +189,78 @@ public class MusicBrainzClient {
 
     @Cacheable(value = "musicbrainzReleaseDetails", key = "#releaseId")
     public MusicBrainzReleaseDetails getReleaseDetails(String releaseId) {
-        return executeWithRetry("getReleaseDetails: " + releaseId, () -> restClient.get()
+        try {
+            return executeWithRetry("getReleaseDetails: " + releaseId, () -> restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/release/{id}")
+                            .queryParam("inc", "recordings+artist-credits+release-groups")
+                            .queryParam("fmt", "json")
+                            .build(releaseId))
+                    .retrieve()
+                    .body(MusicBrainzReleaseDetails.class));
+        } catch (HttpStatusCodeException ex) {
+            if (ex.getStatusCode().value() == 404) {
+                log.info("Release ID [{}] returned 404 from MusicBrainz. Attempting to resolve as Release Group...", releaseId);
+                return resolveReleaseGroupAsReleaseDetails(releaseId);
+            }
+            throw ex;
+        }
+    }
+
+    @Cacheable(value = "musicbrainzReleaseGroupWithReleases", key = "#releaseGroupId")
+    public MusicBrainzReleaseGroup getReleaseGroupWithReleases(String releaseGroupId) {
+        return executeWithRetry("getReleaseGroupWithReleases: " + releaseGroupId, () -> restClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path("/release/{id}")
-                        .queryParam("inc", "recordings+artist-credits+release-groups")
+                        .path("/release-group/{id}")
+                        .queryParam("inc", "releases")
                         .queryParam("fmt", "json")
-                        .build(releaseId))
+                        .build(releaseGroupId))
                 .retrieve()
-                .body(MusicBrainzReleaseDetails.class));
+                .body(MusicBrainzReleaseGroup.class));
+    }
+
+    private MusicBrainzReleaseDetails resolveReleaseGroupAsReleaseDetails(String releaseGroupId) {
+        try {
+            MusicBrainzReleaseGroup rg = getReleaseGroupWithReleases(releaseGroupId);
+            if (rg == null || rg.releases() == null || rg.releases().isEmpty()) {
+                log.warn("No releases found under release group [{}]", releaseGroupId);
+                return null;
+            }
+
+            // Pick the best canonical release:
+            // 1. Prefer Official status
+            // 2. Prefer major markets (US, GB, XW, XE)
+            // 3. Fallback to first available release
+            MusicBrainzRelease canonicalRelease = rg.releases().stream()
+                    .sorted((a, b) -> {
+                        boolean offA = "Official".equalsIgnoreCase(a.status());
+                        boolean offB = "Official".equalsIgnoreCase(b.status());
+                        if (offA && !offB) return -1;
+                        if (!offA && offB) return 1;
+
+                        String cA = a.country() != null ? a.country().toUpperCase() : "";
+                        String cB = b.country() != null ? b.country().toUpperCase() : "";
+                        boolean mktA = List.of("US", "GB", "XW", "XE").contains(cA);
+                        boolean mktB = List.of("US", "GB", "XW", "XE").contains(cB);
+                        if (mktA && !mktB) return -1;
+                        if (!mktA && mktB) return 1;
+
+                        return 0;
+                    })
+                    .findFirst()
+                    .orElse(null);
+
+            if (canonicalRelease == null || canonicalRelease.id() == null) {
+                return null;
+            }
+
+            log.info("Resolved Release-Group ID [{}] to canonical Release ID [{}] ({})",
+                    releaseGroupId, canonicalRelease.id(), canonicalRelease.title());
+            return getReleaseDetails(canonicalRelease.id());
+        } catch (Exception ex) {
+            log.warn("Failed to resolve release group [{}] as release details: {}", releaseGroupId, ex.getMessage());
+            return null;
+        }
     }
 
     @Cacheable(value = "musicbrainzRecordings", key = "#title")

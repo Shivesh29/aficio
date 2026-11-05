@@ -103,9 +103,51 @@ public class CatalogService {
         if (musicBrainzId != null && musicBrainzId.startsWith("yt-")) {
             return syncAlbumFromYoutubeCatalog(musicBrainzId);
         }
+
+        // 1. Short-circuit: If album already exists locally with tracks, return it directly without network call
+        Album existingAlbum = albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(musicBrainzId).orElse(null);
+        if (existingAlbum != null && trackRepository.countByAlbumId(existingAlbum.getId()) > 0) {
+            reconcileTracksWithDataset(existingAlbum);
+            return existingAlbum;
+        }
+
         MusicBrainzReleaseDetails details = musicBrainzClient.getReleaseDetails(musicBrainzId);
         if (details == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Release not found on MusicBrainz for id: " + musicBrainzId);
+        }
+
+        String canonicalReleaseId = details.id() != null ? details.id() : musicBrainzId;
+
+        // 2. Check if album already exists under the canonical release ID
+        if (existingAlbum == null && !canonicalReleaseId.equalsIgnoreCase(musicBrainzId)) {
+            existingAlbum = albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(canonicalReleaseId).orElse(null);
+            if (existingAlbum != null && trackRepository.countByAlbumId(existingAlbum.getId()) > 0) {
+                reconcileTracksWithDataset(existingAlbum);
+                return existingAlbum;
+            }
+        }
+
+        // 3. Check if album already exists for this artist with the same normalized title (prevents duplicate album rows across editions)
+        if (existingAlbum == null && details.title() != null) {
+            String normTitle = normalizeTitle(details.title());
+            String artistMbId = details.artistCredit() != null && !details.artistCredit().isEmpty() && details.artistCredit().get(0).artist() != null
+                    ? details.artistCredit().get(0).artist().id() : null;
+            if (artistMbId != null) {
+                Artist localArtist = artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistMbId).orElse(null);
+                if (localArtist != null) {
+                    List<Album> artistAlbums = albumRepository.findByArtistId(localArtist.getId());
+                    for (Album a : artistAlbums) {
+                        if (a.getTitle() != null && normalizeTitle(a.getTitle()).equalsIgnoreCase(normTitle) && trackRepository.countByAlbumId(a.getId()) > 0) {
+                            existingAlbum = a;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (existingAlbum != null) {
+                reconcileTracksWithDataset(existingAlbum);
+                return existingAlbum;
+            }
         }
 
         // Strictly reject empty releases with 0 tracks - never allow dead albums in the database
@@ -122,12 +164,15 @@ public class CatalogService {
             );
         }
 
-        Album album = albumRepository.findFirstByMusicBrainzIdOrderByIdAsc(musicBrainzId)
-                .orElseGet(() -> createAlbum(details, musicBrainzId));
+        Album album = existingAlbum != null ? existingAlbum : createAlbum(details, canonicalReleaseId);
+        if (album.getMusicBrainzId() == null || !album.getMusicBrainzId().equals(canonicalReleaseId)) {
+            album.setMusicBrainzId(canonicalReleaseId);
+            album = albumRepository.save(album);
+        }
 
         if (album.getCoverArtUrl() == null) {
             String releaseGroupId = details.releaseGroup() != null ? details.releaseGroup().id() : null;
-            String coverUrl = coverArtClient.findFrontCover(musicBrainzId, releaseGroupId);
+            String coverUrl = coverArtClient.findFrontCover(canonicalReleaseId, releaseGroupId);
             if (coverUrl != null && coverUrl.startsWith("http://")) {
                 coverUrl = "https://" + coverUrl.substring(7);
             }

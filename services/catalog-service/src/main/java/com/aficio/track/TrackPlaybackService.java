@@ -564,6 +564,79 @@ public class TrackPlaybackService {
         return false;
     }
 
+    public boolean isRestrictedPlaylistId(String playlistId) {
+        if (playlistId == null || playlistId.isBlank()) return false;
+        if (stringRedisTemplate != null) {
+            try {
+                Boolean member = stringRedisTemplate.opsForSet().isMember("blacklist:playlist_restricted", playlistId);
+                return Boolean.TRUE.equals(member);
+            } catch (Exception ex) {
+                log.debug("Redis blacklist check failed for playlist [{}]: {}", playlistId, ex.getMessage());
+            }
+        }
+        return false;
+    }
+
+    @Transactional
+    public TrackPlaybackResponse handleRestrictedTrackAndResolveUnofficial(Long trackId, String clientId, String customApiKey) {
+        if (trackId == null) return null;
+        Track track = trackRepository.findById(trackId).orElse(null);
+        if (track == null) return null;
+
+        Album album = track.getAlbum();
+        String badVideoId = track.getYoutubeVideoId();
+
+        // 1. Invalidate and blacklist this restricted video ID
+        invalidateRestrictedYoutubeVideoId(trackId);
+
+        // 2. Blacklist stored playlist if it is official or linked to this restricted track
+        if (album != null) {
+            String storedPlaylistId = album.getYoutubePlaylistId();
+            if (storedPlaylistId != null && !storedPlaylistId.isBlank()) {
+                log.info("Blacklisting stored playlist [{}] for album [{}] due to restricted track [{}]",
+                        storedPlaylistId, album.getTitle(), track.getTitle());
+                if (stringRedisTemplate != null) {
+                    try {
+                        stringRedisTemplate.opsForSet().add("blacklist:playlist_restricted", storedPlaylistId);
+                    } catch (Exception ex) {
+                        log.warn("Failed to add playlist [{}] to Redis blacklist: {}", storedPlaylistId, ex.getMessage());
+                    }
+                }
+                album.setYoutubePlaylistId(null);
+                albumRepository.save(album);
+            }
+
+            // Clear any other tracks on this album that had the restricted video ID
+            List<Track> allAlbumTracks = trackRepository.findByAlbumIdOrderByPosition(album.getId());
+            boolean clearedAny = false;
+            for (Track t : allAlbumTracks) {
+                if (badVideoId != null && badVideoId.equals(t.getYoutubeVideoId())) {
+                    t.setYoutubeVideoId(null);
+                    clearedAny = true;
+                }
+            }
+            if (clearedAny) {
+                trackRepository.saveAll(allAlbumTracks);
+            }
+
+            // 3. Search and populate the entire album with a clean, unofficial / fan playlist using quota
+            boolean hasCustomKey = customApiKey != null && !customApiKey.isBlank();
+            String effectiveApiKey = hasCustomKey ? customApiKey.trim() : this.youtubeApiKey;
+
+            if (effectiveApiKey != null && !effectiveApiKey.isBlank()) {
+                log.info("[UNOFFICIAL-RESOLUTION] Attempting to find unofficial album playlist for [{}] by [{}]",
+                        album.getTitle(), album.getArtist() != null ? album.getArtist().getName() : "");
+                boolean populated = populateAlbumPlaylistTracks(album, clientId, effectiveApiKey, hasCustomKey, true);
+                if (populated) {
+                    log.info("[UNOFFICIAL-RESOLUTION] Successfully populated album [{}] with unofficial playlist tracks", album.getTitle());
+                }
+            }
+        }
+
+        // 4. Return new playback response for this track
+        return getPlayback(trackId, clientId, customApiKey);
+    }
+
     /**
      * Resolves YouTube video ID from MusicBrainz recording URL relations.
      * If the track's musicBrainzId was stored as a track MBID rather than a recording MBID,
@@ -823,13 +896,17 @@ public class TrackPlaybackService {
      * Resolves the official YouTube playlist for an album and batch-populates all missing track video IDs.
      */
     private boolean populateAlbumPlaylistTracks(Album album, String clientId, String effectiveApiKey, boolean isCustomKey) {
+        return populateAlbumPlaylistTracks(album, clientId, effectiveApiKey, isCustomKey, false);
+    }
+
+    private boolean populateAlbumPlaylistTracks(Album album, String clientId, String effectiveApiKey, boolean isCustomKey, boolean preferUnofficial) {
         if (album == null || album.getId() == null) return false;
 
         List<Track> albumTracks = trackRepository.findByAlbumIdOrderByPosition(album.getId());
         if (albumTracks.isEmpty()) return false;
 
         boolean hasMissing = albumTracks.stream().anyMatch(t -> t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank());
-        if (!hasMissing) {
+        if (!hasMissing && !preferUnofficial) {
             return false;
         }
 
@@ -838,35 +915,42 @@ public class TrackPlaybackService {
         String workingPlaylistId = null;
         boolean newlyDiscovered = false;
 
-        // 1. If album already has a saved youtubePlaylistId, verify if it yields playable and matching tracks
-        if (album.getYoutubePlaylistId() != null && !album.getYoutubePlaylistId().isBlank()) {
-            List<PlaylistItem> items = fetchPlaylistItems(album.getYoutubePlaylistId(), effectiveApiKey);
-            if (items != null && !items.isEmpty()) {
-                int matchScore = calculatePlaylistMatchScore(albumTracks, items, artistName, album.getTitle());
-                double matchRatio = (double) matchScore / albumTracks.size();
-                if (matchRatio >= 0.90 || (albumTracks.size() <= 2 && matchRatio >= 0.50)) {
-                    workingPlaylistId = album.getYoutubePlaylistId();
-                    workingPlaylistItems = items;
-                    log.info("Stored playlist [{}] verified for album [{}] with {}/{} track title matches",
-                            workingPlaylistId, album.getTitle(), matchScore, albumTracks.size());
+        // 1. If not preferUnofficial and album already has a saved youtubePlaylistId, verify if it yields playable and matching tracks
+        if (!preferUnofficial && album.getYoutubePlaylistId() != null && !album.getYoutubePlaylistId().isBlank()) {
+            if (!isRestrictedPlaylistId(album.getYoutubePlaylistId())) {
+                List<PlaylistItem> items = fetchPlaylistItems(album.getYoutubePlaylistId(), effectiveApiKey);
+                if (items != null && !items.isEmpty()) {
+                    int matchScore = calculatePlaylistMatchScore(albumTracks, items, artistName, album.getTitle());
+                    double matchRatio = (double) matchScore / albumTracks.size();
+                    if (matchRatio >= 0.90 || (albumTracks.size() <= 2 && matchRatio >= 0.50)) {
+                        workingPlaylistId = album.getYoutubePlaylistId();
+                        workingPlaylistItems = items;
+                        log.info("Stored playlist [{}] verified for album [{}] with {}/{} track title matches",
+                                workingPlaylistId, album.getTitle(), matchScore, albumTracks.size());
+                    } else {
+                        log.warn("Stored playlist ID [{}] for album [{}] had low title match ratio ({}/{} tracks matched). Clearing stored playlist to search for complete release.",
+                                album.getYoutubePlaylistId(), album.getTitle(), matchScore, albumTracks.size());
+                        album.setYoutubePlaylistId(null);
+                        albumRepository.save(album);
+                    }
                 } else {
-                    log.warn("Stored playlist ID [{}] for album [{}] had low title match ratio ({}/{} tracks matched). Clearing stored playlist to search for complete release.",
-                            album.getYoutubePlaylistId(), album.getTitle(), matchScore, albumTracks.size());
+                    log.warn("Stored playlist ID [{}] for album [{}] returned 404 or empty. Clearing and falling back to discovery.",
+                            album.getYoutubePlaylistId(), album.getTitle());
                     album.setYoutubePlaylistId(null);
                     albumRepository.save(album);
                 }
             } else {
-                log.warn("Stored playlist ID [{}] for album [{}] returned 404 or empty. Clearing and falling back to discovery.",
+                log.warn("Stored playlist ID [{}] for album [{}] is blacklisted as restricted. Clearing stored playlist.",
                         album.getYoutubePlaylistId(), album.getTitle());
                 album.setYoutubePlaylistId(null);
                 albumRepository.save(album);
             }
         }
 
-        // 2. Try direct playlist ID from MusicBrainz release-group relations (Disabled by default to strictly isolate 12M dataset)
-        if (enableMusicBrainzIds && workingPlaylistId == null) {
+        // 2. Try direct playlist ID from MusicBrainz release-group relations (Only in normal official mode)
+        if (!preferUnofficial && enableMusicBrainzIds && workingPlaylistId == null) {
             String mbPlaylistId = resolveMusicBrainzPlaylistId(album);
-            if (mbPlaylistId != null && !mbPlaylistId.isBlank()) {
+            if (mbPlaylistId != null && !mbPlaylistId.isBlank() && !isRestrictedPlaylistId(mbPlaylistId)) {
                 List<PlaylistItem> candidateItems = fetchPlaylistItems(mbPlaylistId, effectiveApiKey);
                 if (candidateItems != null && !candidateItems.isEmpty()) {
                     int matchScore = calculatePlaylistMatchScore(albumTracks, candidateItems, artistName, album.getTitle());
@@ -889,9 +973,9 @@ public class TrackPlaybackService {
             }
         }
 
-        // 3. Official YouTube Data API Multi-Candidate Search (100 units)
+        // 3. YouTube Data API Multi-Candidate Search (100 units)
         if (workingPlaylistId == null) {
-            List<CandidatePlaylist> candidates = searchYouTubeForCandidatePlaylists(artistName, album.getTitle(), clientId, album.getId(), effectiveApiKey, isCustomKey);
+            List<CandidatePlaylist> candidates = searchYouTubeForCandidatePlaylists(artistName, album.getTitle(), clientId, album.getId(), effectiveApiKey, isCustomKey, preferUnofficial);
             CandidatePlaylist bestCand = null;
             List<PlaylistItem> bestItems = null;
             int bestScore = 0;
@@ -899,13 +983,14 @@ public class TrackPlaybackService {
             int testedCount = 0;
             for (CandidatePlaylist cand : candidates) {
                 if (testedCount >= 4) break; // Check at most top 4 candidates to conserve quota
+                if (isRestrictedPlaylistId(cand.id())) continue;
                 testedCount++;
 
                 List<PlaylistItem> candidateItems = fetchPlaylistItems(cand.id(), effectiveApiKey);
                 if (candidateItems != null && !candidateItems.isEmpty()) {
                     int score = calculatePlaylistMatchScore(albumTracks, candidateItems, artistName, album.getTitle());
-                    log.info("Candidate playlist [{}] ({}) by [{}] matched {}/{} tracks (initial score: {})",
-                            cand.title(), cand.id(), cand.channelTitle(), score, albumTracks.size(), cand.initialScore());
+                    log.info("Candidate playlist [{}] ({}) by [{}] matched {}/{} tracks (initial score: {}, preferUnofficial: {})",
+                            cand.title(), cand.id(), cand.channelTitle(), score, albumTracks.size(), cand.initialScore(), preferUnofficial);
 
                     if (score == albumTracks.size() && cand.initialScore() >= 0) {
                         bestCand = cand;
@@ -929,8 +1014,8 @@ public class TrackPlaybackService {
                     albumRepository.save(album);
                     newlyDiscovered = true;
                     recordAlbumSynced(clientId, album.getId());
-                    log.info("[QUOTA-USAGE] Selected best verified playlist [{}] ({}) by [{}] for album [{}] - {}/{} tracks matched (Key: {})",
-                            bestCand.title(), bestCand.id(), bestCand.channelTitle(), album.getTitle(), bestScore, albumTracks.size(), isCustomKey ? "personal" : "system");
+                    log.info("[QUOTA-USAGE] Selected best verified playlist [{}] ({}) by [{}] for album [{}] - {}/{} tracks matched (preferUnofficial: {}, Key: {})",
+                            bestCand.title(), bestCand.id(), bestCand.channelTitle(), album.getTitle(), bestScore, albumTracks.size(), preferUnofficial, isCustomKey ? "personal" : "system");
                 }
             }
         }
@@ -986,6 +1071,24 @@ public class TrackPlaybackService {
             }
         }
 
+        // In preferUnofficial mode, if any track is still missing, search single track unofficial videos
+        if (preferUnofficial && effectiveApiKey != null && !effectiveApiKey.isBlank()) {
+            boolean anySingleUpdated = false;
+            for (Track t : albumTracks) {
+                if (t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank()) {
+                    String singleVid = searchYouTubeForSingleTrack(artistName, t.getTitle(), album.getTitle(), effectiveApiKey, true);
+                    if (singleVid != null && !singleVid.isBlank()) {
+                        t.setYoutubeVideoId(singleVid);
+                        anySingleUpdated = true;
+                    }
+                }
+            }
+            if (anySingleUpdated) {
+                trackRepository.saveAll(albumTracks);
+                log.info("[UNOFFICIAL-RESOLUTION] Populated missing tracks individually via unofficial searches for [{}]", album.getTitle());
+            }
+        }
+
         return newlyDiscovered;
     }
 
@@ -1026,9 +1129,13 @@ public class TrackPlaybackService {
 
     /**
      * Searches YouTube for candidate album playlists using official YouTube Data API v3 search.list (type=playlist) (100 units).
-     * Retrieves up to 8 candidate playlists and scores them to prioritize official Topic releases and title matches.
+     * Retrieves candidate playlists and scores them to prioritize official or unofficial releases based on preference.
      */
     private List<CandidatePlaylist> searchYouTubeForCandidatePlaylists(String artistName, String albumTitle, String clientId, Long albumId, String effectiveApiKey, boolean isCustomKey) {
+        return searchYouTubeForCandidatePlaylists(artistName, albumTitle, clientId, albumId, effectiveApiKey, isCustomKey, false);
+    }
+
+    private List<CandidatePlaylist> searchYouTubeForCandidatePlaylists(String artistName, String albumTitle, String clientId, Long albumId, String effectiveApiKey, boolean isCustomKey, boolean preferUnofficial) {
         List<CandidatePlaylist> candidates = new ArrayList<>();
         if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
             log.warn("YouTube API key is not configured. Skipping YouTube playlist search (0 quota units).");
@@ -1042,21 +1149,23 @@ public class TrackPlaybackService {
             return candidates;
         }
 
-        String query = (artistName + " " + albumTitle + " album").trim();
+        String query = preferUnofficial
+                ? (artistName + " " + albumTitle + " full album").trim()
+                : (artistName + " " + albumTitle + " album").trim();
         try {
             int currentCount = getSyncedAlbumCount(clientId);
             boolean isOwner = isOwnerAccount(clientId);
             int effectiveLimit = isCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit;
             if (isCustomKey) {
-                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) using PERSONAL API key for [{}] [Cost: 100 quota units | Album {}/{} | 10k Quota]",
-                        clientId, query, currentCount + 1, effectiveLimit);
+                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) using PERSONAL API key for [{}] [Cost: 100 quota units | Album {}/{} | 10k Quota | preferUnofficial: {}]",
+                        clientId, query, currentCount + 1, effectiveLimit, preferUnofficial);
             } else {
-                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) for [{}] [Cost: 100 quota units | Album {}/{} | Owner: {}]",
-                        clientId, query, currentCount + 1, isOwner ? "UNLIMITED" : effectiveLimit, isOwner);
+                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) for [{}] [Cost: 100 quota units | Album {}/{} | Owner: {} | preferUnofficial: {}]",
+                        clientId, query, currentCount + 1, isOwner ? "UNLIMITED" : effectiveLimit, isOwner, preferUnofficial);
             }
 
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String apiUrl = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=8&q="
+            String apiUrl = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=10&q="
                     + encodedQuery + "&key=" + effectiveApiKey;
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl))
@@ -1076,7 +1185,7 @@ public class TrackPlaybackService {
 
                         if (pid.isBlank()) continue;
 
-                        int score = scoreCandidatePlaylist(pid, pTitle, channelTitle, artistName, albumTitle);
+                        int score = scoreCandidatePlaylist(pid, pTitle, channelTitle, artistName, albumTitle, preferUnofficial);
                         candidates.add(new CandidatePlaylist(pid, pTitle, channelTitle, score));
                     }
 
@@ -1102,6 +1211,11 @@ public class TrackPlaybackService {
             return itemsList;
         }
 
+        if (isRestrictedPlaylistId(playlistId)) {
+            log.warn("Skipping blacklisted restricted playlist [{}]", playlistId);
+            return itemsList;
+        }
+
         try {
             log.info("[QUOTA-USAGE] Querying YouTube Data API playlistItems.list for playlist [{}] [Cost: 1 quota unit]", playlistId);
             String apiUrl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId="
@@ -1121,7 +1235,7 @@ public class TrackPlaybackService {
                     for (JsonNode item : items) {
                         String vid = item.path("contentDetails").path("videoId").asText();
                         String title = item.path("snippet").path("title").asText();
-                        if (!vid.isBlank() && itemsList.stream().noneMatch(p -> p.videoId().equals(vid))) {
+                        if (!vid.isBlank() && !isRestrictedVideoId(vid) && itemsList.stream().noneMatch(p -> p.videoId().equals(vid))) {
                             itemsList.add(new PlaylistItem(vid, title));
                         }
                     }
@@ -1144,13 +1258,18 @@ public class TrackPlaybackService {
      * Searches YouTube Data API specifically for an individual missing track with title verification.
      */
     private String searchYouTubeForSingleTrack(String artistName, String trackTitle, String albumTitle, String effectiveApiKey) {
+        return searchYouTubeForSingleTrack(artistName, trackTitle, albumTitle, effectiveApiKey, false);
+    }
+
+    private String searchYouTubeForSingleTrack(String artistName, String trackTitle, String albumTitle, String effectiveApiKey, boolean preferUnofficial) {
         if (effectiveApiKey == null || effectiveApiKey.isBlank() || trackTitle == null || trackTitle.isBlank()) {
             return null;
         }
         try {
-            String q = (artistName + " " + trackTitle + " " + (albumTitle != null ? albumTitle : "") + " audio").trim();
+            String suffix = preferUnofficial ? "lyrics" : "audio";
+            String q = (artistName + " " + trackTitle + " " + (albumTitle != null ? albumTitle : "") + " " + suffix).trim();
             String encoded = URLEncoder.encode(q, StandardCharsets.UTF_8);
-            String url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=3&q="
+            String url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q="
                     + encoded + "&key=" + effectiveApiKey;
 
             HttpRequest req = HttpRequest.newBuilder()
@@ -1167,8 +1286,19 @@ public class TrackPlaybackService {
                     for (JsonNode it : items) {
                         String vid = it.path("id").path("videoId").asText();
                         String vTitle = it.path("snippet").path("title").asText();
-                        if (!vid.isBlank() && isTrackTitleMatch(trackTitle, vTitle, artistName, albumTitle)) {
-                            log.info("Found single track video ID [{}] (\"{}\") for track [{}] via YouTube Data API search", vid, vTitle, trackTitle);
+                        String channelTitle = it.path("snippet").path("channelTitle").asText().toLowerCase();
+
+                        if (vid.isBlank() || isRestrictedVideoId(vid)) {
+                            continue;
+                        }
+
+                        if (preferUnofficial && (channelTitle.contains("topic") || channelTitle.contains("vevo"))) {
+                            continue;
+                        }
+
+                        if (isTrackTitleMatch(trackTitle, vTitle, artistName, albumTitle)) {
+                            log.info("Found single track video ID [{}] (\"{}\") for track [{}] via YouTube Data API search (preferUnofficial: {})",
+                                    vid, vTitle, trackTitle, preferUnofficial);
                             return vid;
                         }
                     }
@@ -1181,50 +1311,80 @@ public class TrackPlaybackService {
     }
 
     public int scoreCandidatePlaylist(String pid, String pTitle, String channelTitle, String artistName, String albumTitle) {
+        return scoreCandidatePlaylist(pid, pTitle, channelTitle, artistName, albumTitle, false);
+    }
+
+    public int scoreCandidatePlaylist(String pid, String pTitle, String channelTitle, String artistName, String albumTitle, boolean preferUnofficial) {
+        if (isRestrictedPlaylistId(pid)) {
+            return -999;
+        }
+
         int score = 0;
         String normAlbum = normalizeTitle(albumTitle);
         String normArtist = normalizeTitle(artistName);
         String normChannel = normalizeTitle(channelTitle);
         String normPTitle = normalizeTitle(pTitle);
 
-        // 1. YouTube Music official auto-generated album playlists always begin with OLAK5uy_
-        if (pid != null && pid.startsWith("OLAK5uy_")) {
-            score += 100;
-        }
-
-        // 2. Channel preference: Strongly prioritize official artist channel, Topic channel, and verified variants
-        if (!normArtist.isBlank()) {
-            if (normChannel.equals(normArtist)) {
-                // Exact channel name match (e.g. Channel "American Football" for Artist "American Football")
-                score += 70;
-            } else if (normChannel.equals(normArtist + " topic") || (normChannel.endsWith("topic") && normChannel.contains(normArtist))) {
-                // Official Topic channel (e.g. "American Football - Topic")
-                score += 60;
-            } else if (normChannel.equals(normArtist + " official")
-                    || normChannel.equals(normArtist + " music")
-                    || normChannel.equals(normArtist + " vevo")) {
-                // Official artist channel variants (e.g. "Radiohead Official", "Daft Punk VEVO")
-                score += 55;
-            } else if (normChannel.contains(normArtist)) {
-                // Channel title includes artist name
-                score += 35;
+        if (preferUnofficial) {
+            // Unofficial mode: penalize official YouTube Music / Topic / VEVO playlists that block embedding
+            if (pid != null && pid.startsWith("OLAK5uy_")) {
+                score -= 300;
             }
-        } else if (normChannel.endsWith("topic")) {
-            score += 20;
-        }
+            if (normChannel.contains("topic") || normChannel.contains("vevo") || normChannel.equals(normArtist + " official")) {
+                score -= 200;
+            }
+            if (pid != null && pid.startsWith("PL")) {
+                score += 80; // Standard user-created playlists begin with "PL"
+            }
+            if (normPTitle.contains("full album") || normPTitle.contains("album") || normPTitle.contains("complete")) {
+                score += 30;
+            }
+            if (!normAlbum.isBlank() && normPTitle.contains(normAlbum)) {
+                score += 50;
+            }
+            if (!normArtist.isBlank() && (normPTitle.contains(normArtist) || normChannel.contains(normArtist))) {
+                score += 30;
+            }
+        } else {
+            // 1. YouTube Music official auto-generated album playlists always begin with OLAK5uy_
+            if (pid != null && pid.startsWith("OLAK5uy_")) {
+                score += 100;
+            }
 
-        // 3. Playlist title similarity
-        if (!normAlbum.isBlank()) {
-            if (normPTitle.contains(normAlbum)) {
-                score += 40;
-            } else if (normAlbum.contains(normPTitle)) {
+            // 2. Channel preference: Strongly prioritize official artist channel, Topic channel, and verified variants
+            if (!normArtist.isBlank()) {
+                if (normChannel.equals(normArtist)) {
+                    // Exact channel name match (e.g. Channel "American Football" for Artist "American Football")
+                    score += 70;
+                } else if (normChannel.equals(normArtist + " topic") || (normChannel.endsWith("topic") && normChannel.contains(normArtist))) {
+                    // Official Topic channel (e.g. "American Football - Topic")
+                    score += 60;
+                } else if (normChannel.equals(normArtist + " official")
+                        || normChannel.equals(normArtist + " music")
+                        || normChannel.equals(normArtist + " vevo")) {
+                    // Official artist channel variants (e.g. "Radiohead Official", "Daft Punk VEVO")
+                    score += 55;
+                } else if (normChannel.contains(normArtist)) {
+                    // Channel title includes artist name
+                    score += 35;
+                }
+            } else if (normChannel.endsWith("topic")) {
                 score += 20;
             }
-        }
 
-        // 4. Boost for containing "album" or "full album"
-        if (normPTitle.contains("full album") || normPTitle.contains("album")) {
-            score += 10;
+            // 3. Playlist title similarity
+            if (!normAlbum.isBlank()) {
+                if (normPTitle.contains(normAlbum)) {
+                    score += 40;
+                } else if (normAlbum.contains(normPTitle)) {
+                    score += 20;
+                }
+            }
+
+            // 4. Boost for containing "album" or "full album"
+            if (normPTitle.contains("full album") || normPTitle.contains("album")) {
+                score += 10;
+            }
         }
 
         // 5. Heavy penalty for covers, tributes, karaoke when original album is not a cover/tribute

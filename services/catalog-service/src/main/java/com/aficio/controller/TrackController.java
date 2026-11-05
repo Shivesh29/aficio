@@ -171,9 +171,26 @@ public class TrackController {
     }
 
     @PostMapping("/tracks/{id}/report-restricted")
-    public org.springframework.http.ResponseEntity<Void> reportRestrictedTrack(@PathVariable Long id) {
-        trackPlaybackService.invalidateRestrictedYoutubeVideoId(id);
-        return org.springframework.http.ResponseEntity.ok().build();
+    public org.springframework.http.ResponseEntity<TrackPlaybackResponse> reportRestrictedTrack(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-YouTube-API-Key", required = false) String headerApiKey,
+            @RequestParam(value = "apiKey", required = false) String queryApiKey,
+            jakarta.servlet.http.HttpServletRequest request
+    ) {
+        String clientId = resolveClientId(request);
+        String customApiKey = (headerApiKey != null && !headerApiKey.isBlank())
+                ? headerApiKey.trim()
+                : (queryApiKey != null && !queryApiKey.isBlank() ? queryApiKey.trim() : null);
+
+        if ((customApiKey == null || customApiKey.isBlank()) && clientId != null && clientId.startsWith("user:")) {
+            customApiKey = trackPlaybackService.resolveUserCloudApiKey(clientId);
+        }
+
+        TrackPlaybackResponse response = trackPlaybackService.handleRestrictedTrackAndResolveUnofficial(id, clientId, customApiKey);
+        if (response != null && response.youtubeVideoId() != null) {
+            return org.springframework.http.ResponseEntity.ok(response);
+        }
+        return org.springframework.http.ResponseEntity.noContent().build();
     }
 
     @PostMapping("/tracks/import")

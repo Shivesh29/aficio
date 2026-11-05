@@ -460,29 +460,50 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           console.warn('[Aficio Player] YouTube Player error:', data.info);
           setIsPlaying(false);
 
-          // Invalidate restricted track ID on the backend so it doesn't linger in cache
           const activeTrackId = currentTrackIdRef.current;
+          const handleTrackSkipFallback = () => {
+            consecutiveErrorsRef.current += 1;
+            const q = queueRef.current;
+            const maxConsecutive = q && q.length > 0 ? Math.min(q.length, 3) : 3;
+
+            // Break the infinite loop if multiple consecutive tracks are restricted/unplayable
+            if (consecutiveErrorsRef.current >= maxConsecutive) {
+              console.warn(`[Aficio Player] Halting playback loop: ${consecutiveErrorsRef.current} consecutive tracks restricted from embedding.`);
+              setError('Playback stopped: Multiple tracks on this album are restricted by YouTube or the copyright owner from embedded playback.');
+              isAdvancingRef.current = false;
+              return;
+            }
+
+            setError('This track is restricted by YouTube or the copyright owner. Skipping...');
+            // Auto-skip unplayable track after brief pause so album playback keeps flowing
+            setTimeout(() => {
+              handleTrackEnded(true);
+            }, 1500);
+          };
+
           if (activeTrackId) {
-            api.catalog.reportTrackRestricted(activeTrackId).catch(() => {});
+            setError('Track restricted by rights owner. Searching for an unofficial album release...');
+            api.catalog.reportTrackRestricted(activeTrackId)
+              .then((newPlayback) => {
+                if (newPlayback && newPlayback.youtubeVideoId) {
+                  console.log(`[Aficio Player] Auto-resolved unofficial video ID [${newPlayback.youtubeVideoId}] for track ${activeTrackId}!`);
+                  currentPlaybackRef.current = newPlayback;
+                  sendIframeCommand('loadVideoById', [newPlayback.youtubeVideoId]);
+                  sendIframeCommand('playVideo');
+                  setIsPlaying(true);
+                  setError(null);
+                  consecutiveErrorsRef.current = 0;
+                } else {
+                  handleTrackSkipFallback();
+                }
+              })
+              .catch((err) => {
+                console.warn('Failed to resolve unofficial track:', err);
+                handleTrackSkipFallback();
+              });
+          } else {
+            handleTrackSkipFallback();
           }
-
-          consecutiveErrorsRef.current += 1;
-          const q = queueRef.current;
-          const maxConsecutive = q && q.length > 0 ? Math.min(q.length, 3) : 3;
-
-          // Break the infinite loop if multiple consecutive tracks are restricted/unplayable
-          if (consecutiveErrorsRef.current >= maxConsecutive) {
-            console.warn(`[Aficio Player] Halting playback loop: ${consecutiveErrorsRef.current} consecutive tracks restricted from embedding.`);
-            setError('Playback stopped: Multiple tracks on this album are restricted by YouTube or the copyright owner from embedded playback.');
-            isAdvancingRef.current = false;
-            return;
-          }
-
-          setError('This track is restricted by YouTube or the copyright owner. Skipping...');
-          // Auto-skip unplayable track after brief pause so album playback keeps flowing
-          setTimeout(() => {
-            handleTrackEnded(true);
-          }, 1500);
         } else if (data.info) {
           if (typeof data.info.currentTime === 'number') {
             setCurrentTime(Math.floor(data.info.currentTime));

@@ -429,10 +429,18 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ youtubeVideoId }),
       }),
-    reportTrackRestricted: (trackId: number | string) =>
-      request<void>(`/tracks/${trackId}/report-restricted`, {
+    reportTrackRestricted: (trackId: number | string) => {
+      const customKey = getCustomYouTubeApiKey();
+      const headers: Record<string, string> = {};
+      if (customKey) {
+        headers['X-YouTube-API-Key'] = customKey;
+      }
+      const queryParam = customKey ? `?apiKey=${encodeURIComponent(customKey)}` : '';
+      return request<TrackPlaybackResponse>(`/tracks/${trackId}/report-restricted${queryParam}`, {
         method: 'POST',
-      }),
+        headers,
+      });
+    },
     syncAlbum: (musicBrainzId: string) =>
       request<Album>(`/albums/${musicBrainzId}/sync`, { method: 'POST' }),
     searchMusicBrainz: (query: string, type: 'album' | 'artist' | 'track' | 'artist-releases') =>

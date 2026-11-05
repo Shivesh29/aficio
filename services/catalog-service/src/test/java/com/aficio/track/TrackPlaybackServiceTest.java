@@ -382,5 +382,28 @@ public class TrackPlaybackServiceTest {
         assertThat(response.newlyDiscovered()).isFalse();
         verify(trackRepository, atLeastOnce()).save(track);
     }
+
+    @Test
+    void shouldPrioritizeUnofficialUserPlaylistsWhenPreferUnofficialIsTrue() {
+        String artist = "Taylor Swift";
+        String album = "evermore";
+
+        // Official YouTube Music playlist starting with OLAK5uy_
+        int officialScore = trackPlaybackService.scoreCandidatePlaylist(
+                "OLAK5uy_kEQJGO2SZ0k", "evermore", "Taylor Swift - Topic", artist, album, true);
+
+        // Official VEVO channel
+        int vevoScore = trackPlaybackService.scoreCandidatePlaylist(
+                "PL_vevo_123", "evermore", "TaylorSwiftVEVO", artist, album, true);
+
+        // Fan / user curated full album playlist
+        int fanScore = trackPlaybackService.scoreCandidatePlaylist(
+                "PLfan_evermore_123", "Taylor Swift - evermore Full Album", "IndieFan99", artist, album, true);
+
+        // In preferUnofficial mode: Fan playlist strongly outranks official auto-generated and VEVO releases
+        assertThat(fanScore).isGreaterThan(officialScore);
+        assertThat(fanScore).isGreaterThan(vevoScore);
+        assertThat(officialScore).isLessThan(0); // Penalized
+    }
 }
 

@@ -720,11 +720,13 @@ public class CatalogService {
 
         // 2. Fetch local synced albums for this artist in Aficio database
         Set<String> localSyncedAlbumTitles = new HashSet<>();
+        List<Album> localAlbumsList = new ArrayList<>();
         artistRepository.findFirstByMusicBrainzIdOrderByIdAsc(artistId).ifPresent(a -> {
             List<Album> existing = albumRepository.findByArtistId(a.getId());
             for (Album alb : existing) {
                 if (alb.getTitle() != null && !alb.getTitle().isBlank()) {
                     localSyncedAlbumTitles.add(alb.getTitle());
+                    localAlbumsList.add(alb);
                 }
             }
         });
@@ -732,6 +734,38 @@ public class CatalogService {
         List<MusicBrainzRelease> combined = new ArrayList<>();
         Set<String> matchedCatalogAlbumNames = new HashSet<>();
         Set<String> seenNormTitles = new HashSet<>();
+
+        // Priority 1: Add canonical local synced albums in Aficio DB (ensures official albums like folklore and evermore are always prioritized)
+        for (Album alb : localAlbumsList) {
+            if (alb.getMusicBrainzId() != null && !alb.getMusicBrainzId().startsWith("yt-")) {
+                String norm = normalizeTitle(alb.getTitle());
+                if (seenNormTitles.add(norm)) {
+                    int trackCount = (int) trackRepository.countByAlbumId(alb.getId());
+                    MusicBrainzReleaseGroup rg = new MusicBrainzReleaseGroup(
+                            alb.getMusicBrainzId(),
+                            alb.getTitle(),
+                            "Album",
+                            null,
+                            null,
+                            null,
+                            null
+                    );
+                    MusicBrainzRelease rel = new MusicBrainzRelease(
+                            alb.getMusicBrainzId(),
+                            alb.getTitle(),
+                            null,
+                            "XW",
+                            "Official",
+                            100,
+                            trackCount,
+                            List.of(new MusicBrainzArtistCredit(artistName, new MusicBrainzArtistReference(artistId, artistName))),
+                            rg
+                    );
+                    combined.add(rel);
+                    matchedCatalogAlbumNames.add(alb.getTitle());
+                }
+            }
+        }
 
         // 3. Filter MusicBrainz releases: ONLY populate and make available releases available in dataset or local DB
         if (mbResponse != null && mbResponse.releases() != null) {

@@ -400,15 +400,6 @@ export const AlbumDetailPage = () => {
 
   return (
     <div className="album-detail-page">
-      {/* Seamless Radial Album Glow (Organic 360° bloom, zero rectangular edges) */}
-      {album.coverArtUrl && (
-        <div
-          className="album-ambient-radial-glow"
-          style={{ backgroundImage: `url(${album.coverArtUrl})` }}
-          aria-hidden="true"
-        />
-      )}
-
       {/* Top Breadcrumbs */}
       <div className="dossier-nav-breadcrumb">
         <Link to="/">Catalog</Link>
@@ -422,7 +413,7 @@ export const AlbumDetailPage = () => {
       <div className="album-mobile-hero">
         <div className="mobile-hero-cover-container">
           <div
-            className="mobile-hero-cover-glow"
+            className="mobile-hero-cover-ambient"
             style={{ backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})` }}
             aria-hidden="true"
           />
@@ -580,7 +571,7 @@ export const AlbumDetailPage = () => {
         <div className="dossier-sidebar">
           <div className="dossier-cover-container">
             <div
-              className="dossier-cover-ambient-glow"
+              className="dossier-cover-ambient"
               style={{ backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})` }}
               aria-hidden="true"
             />

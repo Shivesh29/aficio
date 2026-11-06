@@ -4564,30 +4564,10 @@
   border-radius: 1px;
 }
 
-/* Album detail: clean Spotify & Letterboxd layout with organic ambient glow */
+/* Album detail: clean Spotify & Letterboxd layout with original cover hover glow */
 .album-detail-page {
   position: relative;
   color: var(--text-main);
-  overflow-x: clip;
-}
-
-/* Atmospheric 360° Radial Glow: completely organic ellipse, NO rectangular bounds */
-.album-ambient-radial-glow {
-  position: absolute;
-  top: -140px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1000px, 120vw);
-  height: 600px;
-  border-radius: 50%;
-  background-size: cover;
-  background-position: center 30%;
-  filter: blur(120px) saturate(220%);
-  opacity: 0.32;
-  pointer-events: none;
-  z-index: 0;
-  mask-image: radial-gradient(ellipse 50% 45% at 50% 35%, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.7) 40%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse 50% 45% at 50% 35%, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.7) 40%, transparent 75%);
 }
 
 .album-detail-page .dossier-nav-breadcrumb,
@@ -4621,27 +4601,23 @@
   margin-bottom: 1.25rem;
 }
 
-/* Cover Art Soft Circular Aura (Spherical, never rectangular) */
-.album-detail-page .dossier-cover-ambient-glow {
+/* Original Album Cover Ambient Glow on Hover */
+.album-detail-page .dossier-cover-ambient {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 90%;
-  height: 90%;
-  border-radius: 50%;
+  inset: -14px;
   background-size: cover;
   background-position: center;
-  filter: blur(36px) saturate(200%);
-  opacity: 0.55;
+  filter: blur(28px) saturate(180%);
+  opacity: 0.45;
+  border-radius: calc(var(--radius-md) + 6px);
   z-index: 0;
   pointer-events: none;
   transition: opacity 0.3s ease, filter 0.3s ease;
 }
 
-.album-detail-page .dossier-cover-container:hover .dossier-cover-ambient-glow {
-  opacity: 0.75;
-  filter: blur(44px) saturate(230%);
+.album-detail-page .dossier-cover-container:hover .dossier-cover-ambient {
+  opacity: 0.85;
+  filter: blur(36px) saturate(220%);
 }
 
 .album-detail-page .dossier-cover-img {
@@ -4653,24 +4629,25 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+  transition: transform 0.3s ease;
+}
+
+.album-detail-page .dossier-cover-container:hover .dossier-cover-img {
+  transform: translateY(-2px);
 }
 
 .album-detail-page .mobile-hero-cover-container {
   position: relative;
 }
 
-.album-detail-page .mobile-hero-cover-glow {
+.album-detail-page .mobile-hero-cover-ambient {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 90%;
-  height: 90%;
-  border-radius: 50%;
+  inset: -8px;
   background-size: cover;
   background-position: center;
-  filter: blur(30px) saturate(200%);
-  opacity: 0.5;
+  filter: blur(20px) saturate(160%);
+  opacity: 0.45;
+  border-radius: var(--radius-md);
   z-index: 0;
   pointer-events: none;
 }

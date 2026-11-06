@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type MusicBrainzReleaseResult, type MusicBrainzArtist, type MusicBrainzRecording } from '../api/client';
-import { Search, Sparkles, Disc, Check, ArrowRight, Loader2, Globe, User, Mic } from 'lucide-react';
+import { Search, Disc, Check, ArrowRight, Loader2, Globe, User, Mic, Plus } from 'lucide-react';
 
 type SearchType = 'album' | 'artist' | 'track';
 type SearchResults = MusicBrainzReleaseResult[] | MusicBrainzArtist[] | MusicBrainzRecording[];
@@ -102,7 +102,7 @@ export const SearchImportPage = () => {
       return (
         <div key={release.id} className="release-result-card">
           <div className="release-icon-frame">
-            <Disc size={28} className="spin-slow text-gold" />
+            <Disc size={24} style={{ color: 'var(--text-muted)' }} />
           </div>
           <div className="release-info">
             <span className="release-artist">{artistName}</span>
@@ -114,13 +114,13 @@ export const SearchImportPage = () => {
           </div>
           <div className="release-action">
             {isSynced ? (
-              <button type="button" className="btn-success" onClick={() => navigate(`/album/${isSynced}`)}>
-                <Check size={14} /><span>View Dossier</span><ArrowRight size={13} />
+              <button type="button" className="btn-secondary" onClick={() => navigate(`/album/${isSynced}`)}>
+                <Check size={14} /><span>Added</span><ArrowRight size={13} />
               </button>
             ) : (
               <button type="button" className="btn-primary-sm" disabled={isSyncing} onClick={() => handleSyncAlbum(release)}>
-                {isSyncing ? (<><Loader2 size={14} className="spin-loader" /><span>Enriching...</span></>)
-                            : (<><Sparkles size={14} /><span>Sync to Aficio</span></>)}
+                {isSyncing ? (<><Loader2 size={14} className="spin-loader" /><span>Adding...</span></>)
+                            : (<><Plus size={14} /><span>Add to Library</span></>)}
               </button>
             )}
           </div>
@@ -170,7 +170,7 @@ export const SearchImportPage = () => {
       return (
         <div key={track.id} className="release-result-card">
           <div className="release-icon-frame">
-            <Mic size={28} className="text-gold" />
+            <Mic size={24} style={{ color: 'var(--text-muted)' }} />
           </div>
           <div className="release-info">
             <span className="release-artist">{trackArtist}</span>
@@ -187,8 +187,8 @@ export const SearchImportPage = () => {
           <div className="release-action">
             {trackRelease ? (
               isSynced ? (
-                <button type="button" className="btn-success" onClick={() => navigate(`/album/${isSynced}`)}>
-                  <Check size={14} /><span>View Dossier</span><ArrowRight size={13} />
+                <button type="button" className="btn-secondary" onClick={() => navigate(`/album/${isSynced}`)}>
+                  <Check size={14} /><span>Added</span><ArrowRight size={13} />
                 </button>
               ) : (
                 <button
@@ -198,8 +198,8 @@ export const SearchImportPage = () => {
                   onClick={() => handleSyncAlbum(trackRelease)}
                   title={`Import ${trackRelease.title}`}
                 >
-                  {isSyncing ? (<><Loader2 size={14} className="spin-loader" /><span>Enriching...</span></>)
-                              : (<><Sparkles size={14} /><span>Sync Album</span></>)}
+                  {isSyncing ? (<><Loader2 size={14} className="spin-loader" /><span>Adding...</span></>)
+                              : (<><Plus size={14} /><span>Add Album</span></>)}
                 </button>
               )
             ) : (
@@ -223,17 +223,16 @@ export const SearchImportPage = () => {
   return (
     <div className="search-import-page">
       <section className="search-hero-section">
-        <div className="kicker">Global Music Catalog</div>
-        <h1>Discover & Import Music</h1>
+        <h1>Search</h1>
         <p>
-          Search for albums, artists, or tracks worldwide, and import into Aficio.
+          Search for albums, artists, or tracks to add to your library.
         </p>
 
         <form onSubmit={handleSearch} className="search-form-full">
-          <Search size={20} className="search-input-icon" />
+          <Search size={18} className="search-input-icon" />
           <input
             type="text"
-            placeholder={`Search ${searchType}s (e.g. In Rainbows, Radiohead, Kid A)...`}
+            placeholder={`Search ${searchType}s (e.g. In Rainbows, Radiohead)...`}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -248,8 +247,8 @@ export const SearchImportPage = () => {
             <option value="track">Track</option>
           </select>
           <button type="submit" className="btn-primary" disabled={searching}>
-            {searching ? <Loader2 size={16} className="spin-loader" /> : <Sparkles size={16} />}
-            <span>{searching ? 'Searching...' : 'Search Catalog'}</span>
+            {searching ? <Loader2 size={16} className="spin-loader" /> : <Search size={16} />}
+            <span>{searching ? 'Searching...' : 'Search'}</span>
           </button>
         </form>
       </section>

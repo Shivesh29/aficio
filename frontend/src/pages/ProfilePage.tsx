@@ -231,7 +231,7 @@ export const ProfilePage = () => {
     return (
       <div className="dossier-loading">
         <Loader2 size={36} className="spin-loader" />
-        <p>Loading taste profile...</p>
+        <p>Loading profile...</p>
       </div>
     );
   }
@@ -239,7 +239,7 @@ export const ProfilePage = () => {
   if (error || !profile) {
     return (
       <div className="dossier-error">
-        <h3>Listener profile not found</h3>
+        <h3>User not found</h3>
         <p>{error || 'This user profile does not exist.'}</p>
         <Link to="/" className="btn-secondary">
           Back to Catalog
@@ -262,23 +262,23 @@ export const ProfilePage = () => {
           <div className="profile-title-row">
             <h1>{profile.displayName || profile.username}</h1>
             {profile.displayName && (
-              <span className="profile-handle-subtle" style={{ color: 'var(--aficio-text-secondary)', fontSize: '0.95rem' }}>
+              <span className="profile-handle-subtle" style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
                 @{profile.username}
               </span>
             )}
-            {profile.isPrivate ? (
-              <span className="profile-role-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(234, 179, 8, 0.15)', color: 'var(--aficio-gold, #eab308)' }}>
+            {profile.isPrivate && (
+              <span className="profile-role-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(230, 161, 71, 0.15)', color: 'var(--accent-gold)' }}>
                 <Lock size={12} />
                 <span>Private</span>
               </span>
-            ) : (
-              <span className="profile-role-badge">Music Aficionado</span>
             )}
           </div>
 
-          <p className="profile-bio">
-            {profile.bio || 'Archiving favorite sounds, rating records, and curating collections on Aficio.'}
-          </p>
+          {profile.bio && (
+            <p className="profile-bio">
+              {profile.bio}
+            </p>
+          )}
 
           <div className="profile-stats-row">
             <div

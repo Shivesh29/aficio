@@ -381,7 +381,7 @@ export const AlbumDetailPage = () => {
     return (
       <div className="dossier-loading">
         <Loader2 size={36} className="spin-loader" />
-        <p>Unshelving album dossier...</p>
+        <p>Loading album...</p>
       </div>
     );
   }
@@ -399,7 +399,16 @@ export const AlbumDetailPage = () => {
   }
 
   return (
-    <div className="album-dossier-page">
+    <div className="album-detail-page">
+      {/* Seamless Radial Album Glow (Organic 360° bloom, zero rectangular edges) */}
+      {album.coverArtUrl && (
+        <div
+          className="album-ambient-radial-glow"
+          style={{ backgroundImage: `url(${album.coverArtUrl})` }}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Top Breadcrumbs */}
       <div className="dossier-nav-breadcrumb">
         <Link to="/">Catalog</Link>
@@ -413,8 +422,9 @@ export const AlbumDetailPage = () => {
       <div className="album-mobile-hero">
         <div className="mobile-hero-cover-container">
           <div
-            className="mobile-hero-cover-ambient"
+            className="mobile-hero-cover-glow"
             style={{ backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})` }}
+            aria-hidden="true"
           />
           <img
             src={album.coverArtUrl || FALLBACK_COVER}
@@ -424,9 +434,6 @@ export const AlbumDetailPage = () => {
               (e.target as HTMLImageElement).src = FALLBACK_COVER;
             }}
           />
-          <div className="mobile-badge-tag">
-            <span>AFC / #{String(album.id).padStart(3, '0')}</span>
-          </div>
         </div>
 
         <div className="mobile-hero-meta">
@@ -449,7 +456,7 @@ export const AlbumDetailPage = () => {
               {ratingsList.length > 0 && <span className="stat-count">({ratingsList.length})</span>}
             </div>
             <span className="dot">•</span>
-            <span>{tracks.length} songs</span>
+            <span>{tracks.length} tracks</span>
             {totalMinutes > 0 && (
               <>
                 <span className="dot">•</span>
@@ -492,7 +499,7 @@ export const AlbumDetailPage = () => {
           <div className="mobile-hero-secondary-grid">
             <div className="mobile-quick-star-strip">
               <div className="mobile-star-strip-label">
-                <Star size={12} style={currentUserRating ? { fill: '#e5a93b', color: '#e5a93b' } : undefined} />
+                <Star size={12} style={currentUserRating ? { fill: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined} />
                 <span>{currentUserRating ? `You: ${currentUserRating}★` : 'Rate'}</span>
                 {currentUserRating && (
                   <button
@@ -529,7 +536,7 @@ export const AlbumDetailPage = () => {
               type="button"
               className="mobile-action-pill-btn"
               onClick={handleOpenReviewModal}
-              style={hasWrittenReview ? { borderColor: 'rgba(229, 169, 59, 0.45)', color: 'var(--accent-gold, #e5a93b)' } : undefined}
+              style={hasWrittenReview ? { borderColor: 'rgba(230, 161, 71, 0.45)', color: 'var(--accent-gold)' } : undefined}
             >
               <MessageSquare size={16} />
               <span>{hasWrittenReview ? 'Edit Review' : 'Review'}</span>
@@ -567,16 +574,15 @@ export const AlbumDetailPage = () => {
         </div>
       </div>
 
-      {/* Main Dossier Grid */}
+      {/* Album hero and content */}
       <div className="dossier-main-layout">
-        {/* Left Column: Big Vinyl Cover and Actions */}
+        {/* Cover and actions */}
         <div className="dossier-sidebar">
           <div className="dossier-cover-container">
             <div
-              className="dossier-cover-ambient"
-              style={{
-                backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})`,
-              }}
+              className="dossier-cover-ambient-glow"
+              style={{ backgroundImage: `url(${album.coverArtUrl || FALLBACK_COVER})` }}
+              aria-hidden="true"
             />
             <img
               src={album.coverArtUrl || FALLBACK_COVER}
@@ -586,9 +592,6 @@ export const AlbumDetailPage = () => {
                 (e.target as HTMLImageElement).src = FALLBACK_COVER;
               }}
             />
-            <div className="dossier-badge-tag">
-              <span>AFC / #{String(album.id).padStart(3, '0')}</span>
-            </div>
           </div>
 
           <div className="dossier-actions-stack">
@@ -596,15 +599,6 @@ export const AlbumDetailPage = () => {
               <button
                 type="button"
                 className="dossier-btn-primary"
-                style={{
-                  background: 'linear-gradient(135deg, #e5a93b 0%, #ca8a04 100%)',
-                  color: '#0c0d10',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.6rem'
-                }}
                 onClick={() => {
                   const isCurrentAlbum = tracks.some((t) => t.id === currentTrackId);
                   if (isCurrentAlbum) {
@@ -627,11 +621,11 @@ export const AlbumDetailPage = () => {
                 )}
               </button>
             )}
-            {/* Quick Star Rating Box */}
+            {/* Quick rating */}
             <div className={`dossier-star-rating-box ${currentUserRating ? 'rated' : ''}`}>
               <div className="star-rating-header">
                 <span className={`star-rating-label ${currentUserRating ? 'is-rated' : ''}`}>
-                  <Star size={13} style={currentUserRating ? { fill: '#e5a93b', color: '#e5a93b' } : undefined} />
+                  <Star size={13} style={currentUserRating ? { fill: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined} />
                   <span>{currentUserRating ? `Your Rating: ${currentUserRating} / 5` : 'Rate this album'}</span>
                 </span>
                 {currentUserRating && (
@@ -670,18 +664,18 @@ export const AlbumDetailPage = () => {
               </div>
             </div>
 
-            {/* Write / Edit Review Button */}
+            {/* Log / review */}
             <button
               type="button"
               className="dossier-btn-secondary"
               onClick={handleOpenReviewModal}
-              style={hasWrittenReview ? { borderColor: 'rgba(229, 169, 59, 0.45)', color: 'var(--accent-gold, #e5a93b)' } : undefined}
+              style={hasWrittenReview ? { borderColor: 'rgba(230, 161, 71, 0.45)', color: 'var(--accent-gold)' } : undefined}
             >
               <MessageSquare size={16} />
-              <span>{hasWrittenReview ? 'Edit Your Review' : '+ Write a Review'}</span>
+              <span>{hasWrittenReview ? 'Edit Review' : 'Log / Review'}</span>
             </button>
 
-            {/* Add to Collection Button */}
+            {/* Add to collection */}
             <button
               type="button"
               className="dossier-btn-secondary"
@@ -693,7 +687,7 @@ export const AlbumDetailPage = () => {
           </div>
 
           <div className="dossier-meta-card">
-            <h4>Catalog Specifications</h4>
+            <h4>Album details</h4>
             <div className="meta-spec-row">
               <span>Artist</span>
               <strong>{album.artist?.name || 'Unknown'}</strong>
@@ -709,22 +703,26 @@ export const AlbumDetailPage = () => {
           </div>
         </div>
 
-        {/* Center/Right Column: Metadata, Tracklist, and Reviews */}
+        {/* Metadata, tracklist, and community */}
         <div className="dossier-content">
           <header className="dossier-header">
-            <div className="dossier-kicker">Album Dossier</div>
+            <div className="dossier-kicker">Album</div>
             <h1 className="dossier-title">{album.title}</h1>
             <p className="dossier-artist-subtitle">
-              By {album.artist?.musicBrainzId ? (
+              {album.artist?.musicBrainzId ? (
                 <Link to={`/artist/${album.artist.musicBrainzId}`} className="artist-link-gold" title={`View releases by ${album.artist.name}`}>
-                  <strong>{album.artist?.name}</strong>
+                  <strong>{album.artist?.name || 'Unknown Artist'}</strong>
                 </Link>
               ) : (
                 <strong>{album.artist?.name}</strong>
               )}
             </p>
 
-            {/* Letterboxd-style Community Rating Bar */}
+            <div className="album-meta-line">
+              Year unavailable <span>•</span> {tracks.length} tracks <span>•</span> {totalMinutes > 0 ? `${totalMinutes} min` : 'Runtime unavailable'}
+            </div>
+
+            {/* Community score */}
             <div className="dossier-rating-banner">
               <div className="rating-score-box">
                 <Star size={24} className="star-gold" />
@@ -737,7 +735,7 @@ export const AlbumDetailPage = () => {
                   {writtenReviewsList.length > 0 &&
                     ` • ${writtenReviewsList.length} ${writtenReviewsList.length === 1 ? 'Review' : 'Reviews'}`}
                 </strong>
-                <p>Community score from Aficio listeners</p>
+                <p>Community score</p>
               </div>
             </div>
           </header>
@@ -749,10 +747,16 @@ export const AlbumDetailPage = () => {
                 <Music size={16} />
                 <span>Tracklist</span>
               </h3>
-              <span className="track-stats">{tracks.length} songs</span>
+              <span className="track-stats">{tracks.length} tracks</span>
             </div>
 
             <div className="track-table">
+              <div className="track-table-header" aria-hidden="true">
+                <span>#</span>
+                <span>Title</span>
+                <span>Time</span>
+                <span />
+              </div>
               {tracks.length === 0 ? (
                 <div className="empty-tracks-msg">
                   No individual tracks catalogued for this release.
@@ -806,13 +810,15 @@ export const AlbumDetailPage = () => {
               )}
             </div>
           </section>
+        </div>
+      </div>
 
-          {/* Community Reviews Section */}
-          <section className={`dossier-reviews-section ${mobileTab === 'reviews' ? 'tab-visible' : 'tab-hidden'}`}>
+      {/* Community Reviews Section - Down at the bottom */}
+      <section className={`dossier-reviews-section ${mobileTab === 'reviews' ? 'tab-visible' : 'tab-hidden'}`}>
             <div className="section-subheading">
               <h3>
                 <MessageSquare size={16} />
-                <span>Community Opinions & Logs ({writtenReviewsList.length})</span>
+                <span>Reviews ({writtenReviewsList.length})</span>
               </h3>
               <button
                 type="button"
@@ -828,7 +834,7 @@ export const AlbumDetailPage = () => {
             {writtenReviewsList.length === 0 ? (
               <div className="empty-reviews-box">
                 <Disc3 size={32} className="empty-disc" />
-                <h4>No written reviews recorded yet</h4>
+                <h4>No reviews yet</h4>
                 <p>
                   {ratingsList.length > 0
                     ? `${ratingsList.length} ${ratingsList.length === 1 ? 'listener has' : 'listeners have'} rated this record. Be the first to share your written review for ${album.title}.`
@@ -869,7 +875,7 @@ export const AlbumDetailPage = () => {
                                   padding: '1px 6px',
                                   borderRadius: '999px',
                                   background: 'rgba(229, 169, 59, 0.15)',
-                                  color: 'var(--accent-gold, #e5a93b)',
+                                  color: 'var(--accent-gold)',
                                   border: '1px solid rgba(229, 169, 59, 0.3)',
                                   fontWeight: 700,
                                   textTransform: 'uppercase',
@@ -893,7 +899,7 @@ export const AlbumDetailPage = () => {
                               style={{
                                 background: 'transparent',
                                 border: 'none',
-                                color: 'var(--accent-gold, #e5a93b)',
+                                color: 'var(--accent-gold)',
                                 fontSize: '0.75rem',
                                 fontWeight: 600,
                                 cursor: 'pointer',
@@ -981,8 +987,6 @@ export const AlbumDetailPage = () => {
               </div>
             )}
           </section>
-        </div>
-      </div>
 
       {/* Review Modal */}
       {isReviewModalOpen && (

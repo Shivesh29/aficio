@@ -246,7 +246,7 @@ export const MiniPlayer: React.FC = () => {
       <div className="miniplayer-bar">
         {/* Left: Track Info & Album Art */}
         <div className="miniplayer-track-info">
-          <div className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}>
+          <div className="miniplayer-art-wrap">
             <img
               src={currentPlayback?.coverArtUrl || FALLBACK_COVER}
               alt={currentPlayback?.albumTitle || 'Album Art'}
@@ -255,30 +255,13 @@ export const MiniPlayer: React.FC = () => {
                 (e.target as HTMLImageElement).src = FALLBACK_COVER;
               }}
             />
-            {isPlaying && <div className="miniplayer-vinyl-hole" />}
           </div>
 
           <div className="miniplayer-text-details">
             <div className="miniplayer-title-row">
               <span className="miniplayer-title" title={currentPlayback?.title || 'Playing track'}>
-                {currentPlayback?.title || (isLoading ? 'Loading song...' : 'No track')}
+                {currentPlayback?.title || (isLoading ? 'Loading...' : 'No track')}
               </span>
-              {currentPlayback?.newlyDiscovered ? (
-                <span
-                  className="miniplayer-badge discovery-badge"
-                  title={
-                    currentPlayback.dailyDiscoveriesLimit && currentPlayback.dailyDiscoveriesLimit > 4
-                      ? 'Discovered new album via personal YouTube API key (10k daily quota)'
-                      : 'Discovered new album via YouTube Data API (Used 1 daily query)'
-                  }
-                >
-                  New Discovery ({currentPlayback.dailyDiscoveriesUsed ?? 1}/{currentPlayback.dailyDiscoveriesLimit ?? 4})
-                </span>
-              ) : currentPlayback?.source === 'cached' ? (
-                <span className="miniplayer-badge instant-badge" title="Catalogued release / Cached locally (0 quota used)">
-                  Cached (Free Replay)
-                </span>
-              ) : null}
             </div>
 
             <div className="miniplayer-meta-row">

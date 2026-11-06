@@ -83,7 +83,7 @@ export const ListDetailPage = () => {
     return (
       <div className="dossier-loading">
         <Loader2 size={36} className="spin-loader" />
-        <p>Opening collection...</p>
+        <p>Loading list...</p>
       </div>
     );
   }
@@ -91,10 +91,10 @@ export const ListDetailPage = () => {
   if (error || !list) {
     return (
       <div className="dossier-error">
-        <h3>Collection not found</h3>
-        <p>{error || 'This collection may be private or does not exist.'}</p>
+        <h3>List not found</h3>
+        <p>{error || 'This list may be private or does not exist.'}</p>
         <Link to="/lists" className="btn-secondary">
-          <ArrowLeft size={14} /> Back to Collections
+          <ArrowLeft size={14} /> Back to Lists
         </Link>
       </div>
     );
@@ -106,7 +106,7 @@ export const ListDetailPage = () => {
     <div className="list-detail-page">
       {/* Breadcrumb */}
       <div className="dossier-nav-breadcrumb">
-        <Link to="/lists">Collections</Link>
+        <Link to="/lists">Lists</Link>
         <span>/</span>
         <span className="current">{list.title}</span>
       </div>
@@ -117,7 +117,7 @@ export const ListDetailPage = () => {
           <div className="list-hero-meta">
             <span className={`list-visibility-tag ${isPublic ? 'tag-public' : 'tag-private'}`}>
               {isPublic ? <Globe size={12} /> : <Lock size={12} />}
-              <span>{isPublic ? 'Public Collection' : 'Private Collection'}</span>
+              <span>{isPublic ? 'Public' : 'Private'}</span>
             </span>
             <span className="meta-dot">•</span>
             <span>{items.length} {items.length === 1 ? 'Album' : 'Albums'}</span>
@@ -127,17 +127,17 @@ export const ListDetailPage = () => {
           {isOwner && (
             <div className="collection-owner-actions-bar">
               <Link to="/search" className="btn-secondary-sm">
-                <Plus size={14} /> Add Releases
+                <Plus size={14} /> Add Albums
               </Link>
               <button
                 type="button"
                 className="btn-danger-outline-sm"
                 onClick={() => setIsDeleteCollectionModalOpen(true)}
                 disabled={deleting}
-                title="Permanently delete this collection"
+                title="Delete this list"
               >
                 <Trash2 size={13} />
-                <span>Delete Collection</span>
+                <span>Delete List</span>
               </button>
             </div>
           )}
@@ -152,7 +152,7 @@ export const ListDetailPage = () => {
         <div className="list-hero-author">
           <User size={15} />
           <span>
-            Curated by{' '}
+            List by{' '}
             <Link to={`/u/${list.owner?.username}`}>
               <strong>{list.owner?.username}</strong>
             </Link>
@@ -165,11 +165,11 @@ export const ListDetailPage = () => {
         <div className="section-subheading">
           <h3>
             <Bookmark size={16} />
-            <span>Curated Releases</span>
+            <span>Albums</span>
           </h3>
           {isOwner && (
             <Link to="/search" className="btn-secondary-sm">
-              <Plus size={14} /> Add Releases
+              <Plus size={14} /> Add Albums
             </Link>
           )}
         </div>
@@ -177,7 +177,7 @@ export const ListDetailPage = () => {
         {items.length === 0 ? (
           <div className="empty-catalog-state">
             <Bookmark size={44} className="empty-icon" />
-            <h3>This collection is currently empty</h3>
+            <h3>This list is empty</h3>
             <p>
               {isOwner
                 ? 'Browse the catalog to add albums into this moodboard.'

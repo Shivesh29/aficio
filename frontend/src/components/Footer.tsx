@@ -1,4 +1,4 @@
-import { Disc3, Heart } from 'lucide-react';
+import { Disc3 } from 'lucide-react';
 
 export const Footer = () => {
   return (
@@ -10,7 +10,7 @@ export const Footer = () => {
             <span>aficio.</span>
           </div>
           <p className="footer-motto">
-            The listening room for curious minds. Letterboxd for albums, Pinterest for music collections, and a shared space for music taste.
+            Letterboxd for albums, Spotify for playback. Track, rate, and discuss records you love.
           </p>
         </div>
 
@@ -32,9 +32,6 @@ export const Footer = () => {
 
       <div className="footer-bottom">
         <span>© {new Date().getFullYear()} Aficio — Music as a shared memory.</span>
-        <span className="footer-built-with">
-          Crafted with <Heart size={13} className="heart-icon" /> for music aficionados.
-        </span>
       </div>
     </footer>
   );

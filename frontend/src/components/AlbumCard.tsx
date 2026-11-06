@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Album } from '../api/client';
 import { usePlayer } from '../context/PlayerContext';
-import { Disc, Music, Play, Pause, Loader2 } from 'lucide-react';
+import { Play, Pause, Loader2 } from 'lucide-react';
 
 interface AlbumCardProps {
   album: Album;
@@ -12,7 +12,7 @@ interface AlbumCardProps {
 
 const FALLBACK_COVER = '/record-placeholder.svg';
 
-export const AlbumCard: React.FC<AlbumCardProps> = ({ album, rating, featured = false }) => {
+export const AlbumCard: React.FC<AlbumCardProps> = ({ album, rating }) => {
   const { currentPlayback, isPlaying, playTrack, togglePlay } = usePlayer();
   const [loadingTracks, setLoadingTracks] = useState(false);
 
@@ -42,52 +42,41 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({ album, rating, featured = 
   };
 
   return (
-    <Link to={`/album/${album.id}`} className={`album-card-component ${featured ? 'featured' : ''}`}>
+    <Link to={`/album/${album.id}`} className="album-card-component">
       <div className="album-artwork-wrapper">
-        {/* Vinyl record disc peeking out behind the jacket */}
-        <div className={`vinyl-disc ${isThisAlbumPlaying ? 'is-spinning-disc' : ''}`}>
-          <div className="vinyl-groove"></div>
-          <div className="vinyl-center-label">
-            <Disc size={14} />
+        <img
+          src={album.coverArtUrl || FALLBACK_COVER}
+          alt={`${album.title} cover`}
+          loading="lazy"
+          className="album-cover-img"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = FALLBACK_COVER;
+          }}
+        />
+
+        {rating && (
+          <div className="album-rating-tag">
+            ★ {rating.toFixed(1)}
           </div>
-        </div>
+        )}
 
-        {/* Album Jacket Cover */}
-        <div className="album-jacket">
-          <img
-            src={album.coverArtUrl || FALLBACK_COVER}
-            alt={`${album.title} cover`}
-            loading="lazy"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = FALLBACK_COVER;
-            }}
-          />
-          <div className="jacket-sheen"></div>
-
-          {rating && (
-            <div className="album-rating-tag">
-              ★ {rating.toFixed(1)}
-            </div>
+        {/* Quick Play Button on hover */}
+        <button
+          type="button"
+          className={`album-quick-play-btn ${isCurrentAlbum ? 'is-visible' : ''}`}
+          onClick={handleQuickPlay}
+          disabled={loadingTracks}
+          title={isThisAlbumPlaying ? `Pause ${album.title}` : `Play ${album.title}`}
+          aria-label={isThisAlbumPlaying ? 'Pause album' : 'Play album'}
+        >
+          {loadingTracks ? (
+            <Loader2 size={18} className="spin-loader" />
+          ) : isThisAlbumPlaying ? (
+            <Pause size={18} />
+          ) : (
+            <Play size={18} className="play-icon-offset" />
           )}
-
-          {/* Quick Play Hover Button */}
-          <button
-            type="button"
-            className={`album-quick-play-btn ${isCurrentAlbum ? 'is-visible' : ''}`}
-            onClick={handleQuickPlay}
-            disabled={loadingTracks}
-            title={isThisAlbumPlaying ? `Pause ${album.title}` : `Play ${album.title}`}
-            aria-label={isThisAlbumPlaying ? 'Pause album' : 'Play album'}
-          >
-            {loadingTracks ? (
-              <Loader2 size={16} className="spin-loader" />
-            ) : isThisAlbumPlaying ? (
-              <Pause size={16} />
-            ) : (
-              <Play size={16} className="play-icon-offset" />
-            )}
-          </button>
-        </div>
+        </button>
       </div>
 
       <div className="album-card-info">
@@ -95,8 +84,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({ album, rating, featured = 
           {album.title || 'Untitled Album'}
         </h3>
         <p className="album-artist" title={album.artist?.name || 'Unknown Artist'}>
-          <Music size={12} className="inline-icon" />
-          <span>{album.artist?.name || 'Unknown Artist'}</span>
+          {album.artist?.name || 'Unknown Artist'}
         </p>
       </div>
     </Link>

@@ -122,17 +122,15 @@ export const ListsPage = () => {
       {/* Header */}
       <section className="lists-header-section">
         <div className="lists-title-content">
-          <div className="kicker">Pinterest-Style Curation</div>
-          <h1>Music Collections & Moodboards</h1>
+          <h1>Lists</h1>
           <p>
-            Curated lists of records tailored for moods, eras, Sunday mornings, or deep dives.
-            Build your own archive or explore lists from other aficionados.
+            Collect, curate, and share lists of albums.
           </p>
         </div>
 
         <button type="button" className="btn-primary" onClick={handleOpenCreateModal}>
           <Plus size={16} />
-          <span>New Collection</span>
+          <span>New List</span>
         </button>
       </section>
 
@@ -147,7 +145,7 @@ export const ListsPage = () => {
           }}
         >
           <Globe size={15} />
-          <span>Public Collections</span>
+          <span>Public Lists</span>
         </button>
         {isAuthenticated && (
           <button
@@ -159,7 +157,7 @@ export const ListsPage = () => {
             }}
           >
             <Bookmark size={15} />
-            <span>My Collections</span>
+            <span>My Lists</span>
           </button>
         )}
       </div>

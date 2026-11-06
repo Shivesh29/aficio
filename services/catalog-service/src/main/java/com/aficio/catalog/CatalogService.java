@@ -530,8 +530,13 @@ public class CatalogService {
         album = albumRepository.save(album);
 
         if (jdbcTemplate != null) {
-            String sql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND LOWER(album) = LOWER(?) ORDER BY title";
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, artistName, albumTitle);
+            List<Map<String, Object>> rows = Collections.emptyList();
+            try {
+                String sql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND LOWER(album) = LOWER(?) ORDER BY title";
+                rows = jdbcTemplate.queryForList(sql, artistName, albumTitle);
+            } catch (Exception ex) {
+                log.warn("Failed to query youtube_catalog for synthetic album [{}]: {}", albumTitle, ex.getMessage());
+            }
             List<Track> tracksToSave = new ArrayList<>();
             int pos = 1;
             String firstSongId = null;
@@ -581,14 +586,21 @@ public class CatalogService {
 
         List<Track> existingTracks = trackRepository.findByAlbumIdOrderByPosition(album.getId());
 
-        String sql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND LOWER(album) = LOWER(?) ORDER BY title";
-        List<Map<String, Object>> catalogRows = jdbcTemplate.queryForList(sql, artistName, albumTitle);
-        if (catalogRows.isEmpty()) {
-            String cleanAlbum = cleanAlbumTitle(albumTitle);
-            if (!cleanAlbum.equalsIgnoreCase(albumTitle)) {
-                catalogRows = jdbcTemplate.queryForList(sql, artistName, cleanAlbum);
+        List<Map<String, Object>> catalogRows = Collections.emptyList();
+        try {
+            String sql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND LOWER(album) = LOWER(?) ORDER BY title";
+            catalogRows = jdbcTemplate.queryForList(sql, artistName, albumTitle);
+            if (catalogRows.isEmpty()) {
+                String cleanAlbum = cleanAlbumTitle(albumTitle);
+                if (!cleanAlbum.equalsIgnoreCase(albumTitle)) {
+                    catalogRows = jdbcTemplate.queryForList(sql, artistName, cleanAlbum);
+                }
             }
+        } catch (Exception ex) {
+            log.warn("Failed to query youtube_catalog for album [{}]: {}", albumTitle, ex.getMessage());
+            return existingTracks;
         }
+
         if (catalogRows.isEmpty()) {
             return existingTracks;
         }

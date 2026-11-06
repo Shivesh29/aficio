@@ -9,7 +9,7 @@ import {
   Disc,
   ArrowLeft,
   ArrowRight,
-  Sparkles,
+  Plus,
   Check,
   Loader2,
   User,
@@ -282,7 +282,7 @@ export const ArtistPage = () => {
               return (
                 <div key={release.id} className="release-result-card">
                   <div className="release-icon-frame">
-                    <Disc size={28} className="spin-slow text-gold" />
+                    <Disc size={24} style={{ color: 'var(--text-muted)' }} />
                   </div>
                   <div className="release-info">
                     <span className="release-artist">{artistName}</span>
@@ -291,18 +291,17 @@ export const ArtistPage = () => {
                       {displayTag && <span className="meta-tag">{displayTag}</span>}
                       {release.date && <span className="meta-tag">{release.date}</span>}
                       {release.country && <span className="meta-tag">{release.country}</span>}
-                      <span className="meta-tag-subtle">ID: {release.id.slice(0, 8)}</span>
                     </div>
                   </div>
                   <div className="release-action">
                     {isSynced ? (
                       <button
                         type="button"
-                        className="btn-success"
+                        className="btn-secondary"
                         onClick={() => navigate(`/album/${isSynced}`)}
                       >
                         <Check size={14} />
-                        <span>View Dossier</span>
+                        <span>Added</span>
                         <ArrowRight size={13} />
                       </button>
                     ) : (
@@ -311,17 +310,17 @@ export const ArtistPage = () => {
                         className="btn-primary-sm"
                         disabled={isSyncing}
                         onClick={() => handleSyncAlbum(release)}
-                        title={`Sync ${release.title} to local Aficio catalog`}
+                        title={`Add ${release.title} to your library`}
                       >
                         {isSyncing ? (
                           <>
                             <Loader2 size={14} className="spin-loader" />
-                            <span>Enriching...</span>
+                            <span>Adding...</span>
                           </>
                         ) : (
                           <>
-                            <Sparkles size={14} />
-                            <span>Sync to Aficio</span>
+                            <Plus size={14} />
+                            <span>Add to Library</span>
                           </>
                         )}
                       </button>

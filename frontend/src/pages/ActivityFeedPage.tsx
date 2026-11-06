@@ -7,16 +7,15 @@ import {
   Disc3,
   Play,
   Pause,
-  Sparkles,
-  Radio,
+  Plus,
   ArrowRight,
   Music2,
-  Compass,
+  Check,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export const ActivityFeedPage = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { playTrack, currentPlayback, isPlaying, togglePlay } = usePlayer();
 
   const [feedReleases, setFeedReleases] = useState<FeedRelease[]>([]);
@@ -135,12 +134,11 @@ export const ActivityFeedPage = () => {
   if (!isAuthenticated) {
     return (
       <div className="empty-catalog-state" style={{ margin: '6rem auto' }}>
-        <Radio size={48} className="empty-icon text-gold" />
-        <h3>Sign in to tune your release radar</h3>
-        <p>Your personalized feed curates releases from artists whose records you have played and synced.</p>
+        <Disc3 size={40} style={{ color: 'var(--accent-gold)' }} />
+        <h3>Sign in to view your feed</h3>
+        <p>Your feed curates new and unplayed releases from artists in your library.</p>
         <Link to="/search" className="btn-primary" style={{ marginTop: '1.25rem' }}>
-          <Sparkles size={16} />
-          <span>Explore Open Music Graph</span>
+          <span>Discover Music</span>
         </Link>
       </div>
     );
@@ -163,13 +161,9 @@ export const ActivityFeedPage = () => {
       {/* Header */}
       <section className="feed-header-section">
         <div className="feed-header-left">
-          <div className="feed-kicker">
-            <Radio size={14} className="live-indicator" />
-            <span>PERSONALIZED ALBUM RADAR</span>
-          </div>
-          <h1 className="feed-title">Artist Album Feed</h1>
+          <h1 className="feed-title">Feed</h1>
           <p className="feed-subtitle">
-            Curated full-length albums from artists whose records you have synced or played on your account ({user?.displayName || user?.username}). Replay, sync, and stream in hi-fi permanence.
+            Releases and recommendations based on your listening history.
           </p>
         </div>
       </section>
@@ -178,26 +172,21 @@ export const ActivityFeedPage = () => {
       <section className="feed-content-section">
         {loadingReleases ? (
           <div className="loading-state-container feed-loading-deck">
-            <div className="feed-spinner-halo">
-              <Loader2 size={36} className="spin-loader" />
-            </div>
-            <p className="feed-loading-text">Scanning artist discographies and generating your album radar...</p>
+            <Loader2 size={32} className="spin-loader" />
+            <p className="feed-loading-text">Loading feed...</p>
           </div>
         ) : validAlbumReleases.length === 0 ? (
           <div className="empty-catalog-state">
-            <div className="empty-vinyl-deck">
-              <Disc3 size={48} className="spin-slow" style={{ color: 'var(--accent-gold)' }} />
-            </div>
-            <h3>Your Album Radar is Tuning In</h3>
+            <Disc3 size={40} style={{ color: 'var(--accent-gold)' }} />
+            <h3>Your feed is empty</h3>
             <p>
-              You haven't played or synced albums by any artists yet. Once you listen to an artist, unplayed releases and notable albums from their discography will automatically appear right here in your feed.
+              Listen to or add albums to discover more releases from your favorite artists.
             </p>
 
             {starterAlbums.length > 0 && (
               <div className="feed-starter-section" style={{ width: '100%', maxWidth: '900px' }}>
                 <div className="feed-starter-header">
-                  <h4>Tune your feed instantly with an iconic record:</h4>
-                  <p>Stream any record below to immediately activate your personalized artist releases.</p>
+                  <h4>Popular Albums to Get Started:</h4>
                 </div>
                 <div className="feed-starter-grid">
                   {starterAlbums.map((album) => (
@@ -243,15 +232,14 @@ export const ActivityFeedPage = () => {
           </div>
         ) : (
           <>
-            {/* Quick Sub-Filter Controls */}
+            {/* Filter Controls */}
             <div className="feed-subfilter-bar">
               <button
                 type="button"
                 className={`feed-subfilter-btn ${albumScopeFilter === 'all' ? 'active' : ''}`}
                 onClick={() => setAlbumScopeFilter('all')}
               >
-                <Disc3 size={13} />
-                <span>All Albums</span>
+                <span>All</span>
                 <span className="feed-subfilter-count">{validAlbumReleases.length}</span>
               </button>
               <button
@@ -259,8 +247,7 @@ export const ActivityFeedPage = () => {
                 className={`feed-subfilter-btn ${albumScopeFilter === 'ready' ? 'active' : ''}`}
                 onClick={() => setAlbumScopeFilter('ready')}
               >
-                <Sparkles size={13} />
-                <span>Stream Ready</span>
+                <span>In Library</span>
                 <span className="feed-subfilter-count">{readyCount}</span>
               </button>
               <button
@@ -268,8 +255,7 @@ export const ActivityFeedPage = () => {
                 className={`feed-subfilter-btn ${albumScopeFilter === 'discover' ? 'active' : ''}`}
                 onClick={() => setAlbumScopeFilter('discover')}
               >
-                <Compass size={13} />
-                <span>Discoverable</span>
+                <span>Discover</span>
                 <span className="feed-subfilter-count">{discoverCount}</span>
               </button>
             </div>
@@ -314,7 +300,7 @@ export const ActivityFeedPage = () => {
                               type="button"
                               className="feed-play-circle-btn"
                               onClick={() => handlePlayRelease(release)}
-                              title={isCurrentlyPlaying ? 'Pause record' : 'Stream record'}
+                              title={isCurrentlyPlaying ? 'Pause' : 'Play'}
                             >
                               {isCurrentlyPlaying ? (
                                 <Pause size={20} />
@@ -328,12 +314,12 @@ export const ActivityFeedPage = () => {
                               className="feed-sync-circle-btn"
                               disabled={isSyncingThis}
                               onClick={() => handleSyncRelease(release)}
-                              title="Sync album to your catalog"
+                              title="Add to library"
                             >
                               {isSyncingThis ? (
                                 <Loader2 size={20} className="spin-loader" />
                               ) : (
-                                <Sparkles size={20} />
+                                <Plus size={20} />
                               )}
                             </button>
                           )}
@@ -356,16 +342,16 @@ export const ActivityFeedPage = () => {
                         <div className="feed-card-footer">
                           {release.inCatalog ? (
                             <span className="feed-catalog-badge">
-                              <Sparkles size={13} />
+                              <Check size={12} />
                               <span>
                                 {release.trackCount
-                                  ? `Album • ${release.trackCount} tracks`
-                                  : 'Stream Ready'}
+                                  ? `${release.trackCount} tracks`
+                                  : 'In Library'}
                               </span>
                             </span>
                           ) : (
                             <span className="feed-sync-badge">
-                              Album • {release.trackCount ? `${release.trackCount} tracks` : 'Full LP'}
+                              {release.trackCount ? `${release.trackCount} tracks` : 'Album'}
                               {release.date ? ` • ${release.date.substring(0, 4)}` : ''}
                             </span>
                           )}
@@ -377,13 +363,13 @@ export const ActivityFeedPage = () => {
                                   type="button"
                                   className="btn-play-sm"
                                   onClick={() => handlePlayRelease(release)}
-                                  title={isCurrentlyPlaying ? 'Pause record' : 'Play record'}
+                                  title={isCurrentlyPlaying ? 'Pause' : 'Play'}
                                 >
                                   {isCurrentlyPlaying ? <Pause size={12} /> : <Play size={12} />}
                                   <span>{isCurrentlyPlaying ? 'Pause' : 'Play'}</span>
                                 </button>
                                 <Link to={`/album/${release.id}`} className="btn-secondary-sm">
-                                  <span>Dossier</span>
+                                  <span>View</span>
                                   <ArrowRight size={12} />
                                 </Link>
                               </>
@@ -393,17 +379,17 @@ export const ActivityFeedPage = () => {
                                 className="btn-primary-sm"
                                 disabled={isSyncingThis}
                                 onClick={() => handleSyncRelease(release)}
-                                title="Sync album to your catalog"
+                                title="Add album to your library"
                               >
                                 {isSyncingThis ? (
                                   <>
                                     <Loader2 size={12} className="spin-loader" />
-                                    <span>Syncing...</span>
+                                    <span>Adding...</span>
                                   </>
                                 ) : (
                                   <>
-                                    <Sparkles size={12} />
-                                    <span>Sync Album</span>
+                                    <Plus size={12} />
+                                    <span>Add</span>
                                   </>
                                 )}
                               </button>

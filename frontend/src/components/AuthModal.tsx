@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../context/useAuth';
-import { X, Sparkles, LogIn, UserPlus, Eye, EyeOff, MailCheck, Copy, Check } from 'lucide-react';
+import { X, Disc3, LogIn, UserPlus, Eye, EyeOff, MailCheck, Copy, Check } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -275,13 +275,13 @@ export const AuthModal = () => {
 
         <div className="auth-header">
           <div className="auth-icon-badge">
-            <Sparkles size={20} className="sparkle-gold" />
+            <Disc3 size={20} style={{ color: 'var(--accent-gold)' }} />
           </div>
           <h2>{authModalTab === 'login' ? 'Welcome back' : 'Join Aficio'}</h2>
           <p>
             {authModalTab === 'login'
               ? 'Sign in to review albums, curate lists, and talk music.'
-              : 'Start your music dossier and build your personal listening identity.'}
+              : 'Create an account to review albums, build lists, and share your music taste.'}
           </p>
         </div>
 

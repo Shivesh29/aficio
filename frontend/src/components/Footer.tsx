@@ -7,10 +7,10 @@ export const Footer = () => {
         <div className="footer-brand-col">
           <div className="footer-logo">
             <Disc3 size={18} />
-            <span>aficio.</span>
+            <span>aficio</span>
           </div>
           <p className="footer-motto">
-            Letterboxd for albums, Spotify for playback. Track, rate, and discuss records you love.
+            Track, rate, and discover records you love.
           </p>
         </div>
 

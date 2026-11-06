@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Album } from '../api/client';
 import { usePlayer } from '../context/PlayerContext';
-import { Play, Pause, Loader2 } from 'lucide-react';
+import { Disc, Play, Pause, Loader2 } from 'lucide-react';
 
 interface AlbumCardProps {
   album: Album;
@@ -44,39 +44,50 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({ album, rating }) => {
   return (
     <Link to={`/album/${album.id}`} className="album-card-component">
       <div className="album-artwork-wrapper">
-        <img
-          src={album.coverArtUrl || FALLBACK_COVER}
-          alt={`${album.title} cover`}
-          loading="lazy"
-          className="album-cover-img"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = FALLBACK_COVER;
-          }}
-        />
-
-        {rating && (
-          <div className="album-rating-tag">
-            ★ {rating.toFixed(1)}
+        {/* Vinyl record disc peeking out behind the jacket */}
+        <div className={`vinyl-disc ${isThisAlbumPlaying ? 'is-spinning-disc' : ''}`}>
+          <div className="vinyl-groove"></div>
+          <div className="vinyl-center-label">
+            <Disc size={14} />
           </div>
-        )}
+        </div>
 
-        {/* Quick Play Button on hover */}
-        <button
-          type="button"
-          className={`album-quick-play-btn ${isCurrentAlbum ? 'is-visible' : ''}`}
-          onClick={handleQuickPlay}
-          disabled={loadingTracks}
-          title={isThisAlbumPlaying ? `Pause ${album.title}` : `Play ${album.title}`}
-          aria-label={isThisAlbumPlaying ? 'Pause album' : 'Play album'}
-        >
-          {loadingTracks ? (
-            <Loader2 size={18} className="spin-loader" />
-          ) : isThisAlbumPlaying ? (
-            <Pause size={18} />
-          ) : (
-            <Play size={18} className="play-icon-offset" />
+        {/* Album Jacket Cover */}
+        <div className="album-jacket">
+          <img
+            src={album.coverArtUrl || FALLBACK_COVER}
+            alt={`${album.title} cover`}
+            loading="lazy"
+            className="album-cover-img"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = FALLBACK_COVER;
+            }}
+          />
+
+          {rating && (
+            <div className="album-rating-tag">
+              ★ {rating.toFixed(1)}
+            </div>
           )}
-        </button>
+
+          {/* Quick Play Button on hover */}
+          <button
+            type="button"
+            className={`album-quick-play-btn ${isCurrentAlbum ? 'is-visible' : ''}`}
+            onClick={handleQuickPlay}
+            disabled={loadingTracks}
+            title={isThisAlbumPlaying ? `Pause ${album.title}` : `Play ${album.title}`}
+            aria-label={isThisAlbumPlaying ? 'Pause album' : 'Play album'}
+          >
+            {loadingTracks ? (
+              <Loader2 size={18} className="spin-loader" />
+            ) : isThisAlbumPlaying ? (
+              <Pause size={18} />
+            ) : (
+              <Play size={18} className="play-icon-offset" />
+            )}
+          </button>
+        </div>
       </div>
 
       <div className="album-card-info">

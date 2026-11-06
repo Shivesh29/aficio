@@ -246,7 +246,7 @@ export const MiniPlayer: React.FC = () => {
       <div className="miniplayer-bar">
         {/* Left: Track Info & Album Art */}
         <div className="miniplayer-track-info">
-          <div className="miniplayer-art-wrap">
+          <div className={`miniplayer-art-wrap ${isPlaying ? 'is-spinning' : ''}`}>
             <img
               src={currentPlayback?.coverArtUrl || FALLBACK_COVER}
               alt={currentPlayback?.albumTitle || 'Album Art'}
@@ -255,6 +255,7 @@ export const MiniPlayer: React.FC = () => {
                 (e.target as HTMLImageElement).src = FALLBACK_COVER;
               }}
             />
+            {isPlaying && <div className="miniplayer-vinyl-hole" />}
           </div>
 
           <div className="miniplayer-text-details">

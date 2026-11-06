@@ -52,7 +52,7 @@ export const Navbar = () => {
         {/* Brand */}
         <Link to="/" className="brand-wordmark">
           <Disc3 className="brand-vinyl-icon" size={24} />
-          <span>aficio<em>.</em></span>
+          <span>aficio</span>
         </Link>
 
         {/* Primary Navigation */}

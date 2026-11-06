@@ -29,7 +29,6 @@ public class EmailService {
 
     public String sendVerificationEmail(Long userId, String toEmail, String token) {
         String verificationUrl = frontendUrl + "/verify-email?token=" + token;
-        log.info("Verification link for {}: {}", toEmail, verificationUrl);
 
         if (resendApiKey != null && !resendApiKey.isBlank()) {
             try {
@@ -49,7 +48,7 @@ public class EmailService {
                 log.error("Unexpected error sending verification email to: {}, error: {}", toEmail, e.getMessage());
             }
         } else {
-            log.info("RESEND_API_KEY is not configured; logged verification link: {}", verificationUrl);
+            log.info("RESEND_API_KEY is not configured; local verification link: {}", verificationUrl);
         }
 
         return verificationUrl;

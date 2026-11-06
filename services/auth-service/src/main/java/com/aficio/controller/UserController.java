@@ -99,21 +99,17 @@ public class UserController {
 
         User savedUser = userRepository.save(user);
 
-        String verificationUrl = null;
         try {
-            verificationUrl = emailService.sendVerificationEmail(savedUser.getId(), savedUser.getEmail(), token);
+            emailService.sendVerificationEmail(savedUser.getId(), savedUser.getEmail(), token);
         } catch (Exception e) {
             log.error("Registration succeeded but verification email failed for user: {}", savedUser.getUsername(), e);
-            String fallbackUrl = frontendUrl + "/verify-email?token=" + token;
-            log.warn("Verification fallback link for {}: {}", savedUser.getEmail(), fallbackUrl);
-            verificationUrl = fallbackUrl;
         }
 
         return new RegistrationResponse(
                 savedUser.getId(),
                 savedUser.getUsername(),
                 savedUser.getEmail(),
-                verificationUrl
+                null
         );
     }
 

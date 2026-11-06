@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../context/useAuth';
-import { X, Disc3, LogIn, UserPlus, Eye, EyeOff, MailCheck, Copy, Check } from 'lucide-react';
+import { X, Disc3, LogIn, UserPlus, Eye, EyeOff, MailCheck } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -54,10 +54,8 @@ export const AuthModal = () => {
   // Registration verification state
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState('');
-  const [verificationUrl, setVerificationUrl] = useState('');
   const [resending, setResending] = useState(false);
   const [resendSuccessMsg, setResendSuccessMsg] = useState('');
-  const [copiedLink, setCopiedLink] = useState(false);
 
   // Prevent accidental dismissal when user drags cursor while selecting/copying text
   const backdropMouseDownRef = useRef(false);
@@ -71,13 +69,6 @@ export const AuthModal = () => {
       closeAuthModal();
     }
     backdropMouseDownRef.current = false;
-  };
-
-  const handleCopyVerificationLink = () => {
-    if (!verificationUrl) return;
-    navigator.clipboard.writeText(verificationUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   // 2FA state
@@ -228,19 +219,8 @@ export const AuthModal = () => {
           throw new Error('Passwords do not match. Please verify your password entry.');
         }
 
-        const res = await register(username.trim(), email.trim(), password);
+        await register(username.trim(), email.trim(), password);
         setRegisteredEmail(email.trim());
-
-        let directLink = res?.verificationUrl || '';
-        if (directLink && typeof window !== 'undefined') {
-          try {
-            const urlObj = new URL(directLink);
-            directLink = `${window.location.origin}${urlObj.pathname}${urlObj.search}`;
-          } catch {
-            // fallback
-          }
-        }
-        setVerificationUrl(directLink);
         setRegistrationSuccess(true);
         return;
       }
@@ -351,74 +331,6 @@ export const AuthModal = () => {
                 }}
               >
                 {resendSuccessMsg}
-              </div>
-            )}
-
-            {verificationUrl && (
-              <div
-                style={{
-                  marginBottom: '1.5rem',
-                  padding: '0.85rem',
-                  background: 'rgba(230, 161, 71, 0.08)',
-                  border: '1px solid rgba(230, 161, 71, 0.25)',
-                  borderRadius: 'var(--radius-sm)',
-                  textAlign: 'left',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '0.35rem',
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      color: 'var(--accent-gold)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    Direct Activation Link
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyVerificationLink}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: copiedLink ? '#34d399' : 'var(--text-muted)',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      padding: '0.15rem 0.35rem',
-                    }}
-                    title="Copy verification link"
-                  >
-                    {copiedLink ? <Check size={13} /> : <Copy size={13} />}
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-                  </button>
-                </div>
-                <a
-                  href={verificationUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    color: 'var(--text-main)',
-                    fontSize: '0.825rem',
-                    textDecoration: 'underline',
-                    wordBreak: 'break-all',
-                    display: 'block',
-                  }}
-                >
-                  Click here to verify {registeredEmail} &rarr;
-                </a>
               </div>
             )}
 

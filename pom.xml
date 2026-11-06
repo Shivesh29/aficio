@@ -32,14 +32,10 @@
     <modules>
         <module>shared/kafka-events</module>
         <module>shared/dto-lib</module>
-        <module>services/config-server</module>
-        <module>services/eureka-server</module>
         <module>services/api-gateway</module>
         <module>services/auth-service</module>
         <module>services/catalog-service</module>
         <module>services/social-service</module>
-        <module>services/notification-service</module>
-        <module>services/activity-service</module>
     </modules>
 
     <dependencyManagement>

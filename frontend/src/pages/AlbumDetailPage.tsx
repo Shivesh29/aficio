@@ -94,7 +94,7 @@ export const AlbumDetailPage = () => {
       try {
         setLoading(true);
         const [albumData, tracksData, reviewsData] = await Promise.all([
-          api.catalog.getAlbumById(id),
+          api.catalog.getAlbumById(id, user?.username),
           api.catalog.getTracks(id),
           api.reviews.getAlbumReviews(id).catch(() => []),
         ]);
@@ -140,7 +140,7 @@ export const AlbumDetailPage = () => {
       }
     }
     void loadAlbumData();
-  }, [id]);
+  }, [id, user?.username]);
 
   // Calculate average rating across all ratings
   const averageRating =

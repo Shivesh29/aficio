@@ -196,7 +196,11 @@ public class AlbumController {
     }
 
     @GetMapping("/albums/{id}")
-    public AlbumResponse getAlbumById(@PathVariable Long id) {
+    public AlbumResponse getAlbumById(
+            @PathVariable Long id,
+            @RequestParam(value = "username", required = false) String paramUsername,
+            jakarta.servlet.http.HttpServletRequest request
+    ) {
         Album album = albumRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -205,7 +209,30 @@ public class AlbumController {
         if (album.getCoverArtUrl() == null && album.getMusicBrainzId() != null) {
             album = catalogService.resolveMissingCoverArt(album);
         }
+        recordUserAlbumView(album, paramUsername, request);
         return CatalogMapper.toAlbumResponse(album);
+    }
+
+    private void recordUserAlbumView(Album album, String paramUsername, jakarta.servlet.http.HttpServletRequest request) {
+        if (album == null || userAlbumHistoryRepository == null) return;
+        String username = paramUsername;
+        if ((username == null || username.isBlank()) && request != null) {
+            String clientId = resolveClientId(request);
+            username = extractUsername(clientId);
+        }
+        if (username == null || username.isBlank() || "default".equalsIgnoreCase(username)) return;
+
+        try {
+            final String finalUsername = username.trim().toLowerCase(java.util.Locale.ROOT);
+            com.aficio.history.UserAlbumHistory history = userAlbumHistoryRepository
+                    .findByUsernameIgnoreCaseAndAlbumId(finalUsername, album.getId())
+                    .orElseGet(() -> new com.aficio.history.UserAlbumHistory(finalUsername, album, false));
+            history.setPlayedAt(java.time.LocalDateTime.now());
+            userAlbumHistoryRepository.save(history);
+            log.info("Recorded album view for user [{}] album [{}] ({})", finalUsername, album.getId(), album.getTitle());
+        } catch (Exception ex) {
+            log.warn("Failed to record album view for user [{}] album [{}]: {}", username, album.getId(), ex.getMessage());
+        }
     }
 
     @GetMapping("/artists/albums")

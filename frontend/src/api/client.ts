@@ -404,7 +404,8 @@ export const api = {
     getMyAlbums: (limit: number = 60, username?: string) =>
       request<Album[]>(`/albums/my?limit=${limit}${username ? `&username=${encodeURIComponent(username)}` : ''}`),
     getFeed: (limit?: number) => request<FeedRelease[]>(limit ? `/albums/feed?limit=${limit}` : '/albums/feed'),
-    getAlbumById: (id: number | string) => request<Album>(`/albums/${id}`),
+    getAlbumById: (id: number | string, username?: string) =>
+      request<Album>(`/albums/${id}${username ? `?username=${encodeURIComponent(username)}` : ''}`),
     getTracks: (albumId: number | string) => request<Track[]>(`/tracks?albumId=${albumId}`),
     getTrackPlayback: (trackId: number | string) => {
       const customKey = getCustomYouTubeApiKey();

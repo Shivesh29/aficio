@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -470,7 +471,11 @@ public class CatalogService {
         return str.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
     }
 
-    private Map<String, Object> findBestCatalogMatch(String targetCleanTitle, List<Map<String, Object>> catalogRows) {
+    public Map<String, Object> findBestCatalogMatch(String targetCleanTitle, List<Map<String, Object>> catalogRows) {
+        return findBestCatalogMatch(targetCleanTitle, null, catalogRows);
+    }
+
+    public Map<String, Object> findBestCatalogMatch(String targetCleanTitle, Integer targetLengthMs, List<Map<String, Object>> catalogRows) {
         if (targetCleanTitle == null || targetCleanTitle.isBlank() || catalogRows == null) return null;
         String tLower = targetCleanTitle.trim().toLowerCase();
 
@@ -494,6 +499,14 @@ public class CatalogService {
             String raw = (String) row.get("title");
             String c = cleanTrackTitle(raw).toLowerCase();
             if (c.contains(tLower) || tLower.contains(c)) {
+                return row;
+            }
+        }
+
+        for (Map<String, Object> row : catalogRows) {
+            String raw = (String) row.get("title");
+            Integer dur = row.get("duration") != null ? ((Number) row.get("duration")).intValue() : null;
+            if (CatalogNormalizationUtils.isTrackFuzzyMatch(targetCleanTitle, targetLengthMs, raw, dur)) {
                 return row;
             }
         }
@@ -590,10 +603,51 @@ public class CatalogService {
         try {
             String sql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND LOWER(album) = LOWER(?) ORDER BY title";
             catalogRows = jdbcTemplate.queryForList(sql, artistName, albumTitle);
+            String cleanAlbum = cleanAlbumTitle(albumTitle);
+            if (catalogRows.isEmpty() && !cleanAlbum.equalsIgnoreCase(albumTitle)) {
+                catalogRows = jdbcTemplate.queryForList(sql, artistName, cleanAlbum);
+            }
+
             if (catalogRows.isEmpty()) {
-                String cleanAlbum = cleanAlbumTitle(albumTitle);
-                if (!cleanAlbum.equalsIgnoreCase(albumTitle)) {
-                    catalogRows = jdbcTemplate.queryForList(sql, artistName, cleanAlbum);
+                // Gather artist variants: aliases sharing MusicBrainz ID + vowel/phonetic variants
+                Set<String> artistVariants = new LinkedHashSet<>();
+                artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(artistName));
+                if (album.getArtist() != null && album.getArtist().getMusicBrainzId() != null) {
+                    try {
+                        List<Artist> mbidArtists = artistRepository.findAllByMusicBrainzId(album.getArtist().getMusicBrainzId());
+                        for (Artist a : mbidArtists) {
+                            if (a.getName() != null) {
+                                artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(a.getName()));
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                // Check candidate artists in youtube_catalog for this album title
+                try {
+                    String candidateSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)";
+                    List<String> candArtists = jdbcTemplate.query(candidateSql, (rs, rowNum) -> rs.getString("artist"), albumTitle, cleanAlbum);
+                    for (String cand : candArtists) {
+                        if (cand != null && (CatalogNormalizationUtils.isArtistMatch(artistName, cand)
+                                || artistVariants.stream().anyMatch(v -> CatalogNormalizationUtils.isArtistMatch(v, cand)))) {
+                            artistVariants.add(cand);
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.debug("Candidate artist search failed for album [{}]: {}", albumTitle, ex.getMessage());
+                }
+
+                for (String variant : artistVariants) {
+                    if (variant.equalsIgnoreCase(artistName)) continue;
+                    catalogRows = jdbcTemplate.queryForList(sql, variant, albumTitle);
+                    if (catalogRows.isEmpty() && !cleanAlbum.equalsIgnoreCase(albumTitle)) {
+                        catalogRows = jdbcTemplate.queryForList(sql, variant, cleanAlbum);
+                    }
+                    if (!catalogRows.isEmpty()) {
+                        log.info("Resolved youtube_catalog rows for album [{}] using artist variant [{}] (original [{}])",
+                                albumTitle, variant, artistName);
+                        break;
+                    }
                 }
             }
         } catch (Exception ex) {
@@ -630,7 +684,7 @@ public class CatalogService {
                     boolean anySubMatch = false;
                     for (String part : parts) {
                         String cleanPart = cleanTrackTitle(part);
-                        Map<String, Object> matchedCat = findBestCatalogMatch(cleanPart, catalogRows);
+                        Map<String, Object> matchedCat = findBestCatalogMatch(cleanPart, null, catalogRows);
                         if (matchedCat != null) {
                             String songId = (String) matchedCat.get("song_id");
                             if (includedSongIds.add(songId)) {
@@ -651,7 +705,7 @@ public class CatalogService {
                     }
                 } else {
                     String clean = cleanTrackTitle(origTitle);
-                    Map<String, Object> matchedCat = findBestCatalogMatch(clean, catalogRows);
+                    Map<String, Object> matchedCat = findBestCatalogMatch(clean, t.getLengthMilliseconds(), catalogRows);
                     if (matchedCat != null) {
                         String songId = (String) matchedCat.get("song_id");
                         includedSongIds.add(songId);
@@ -692,7 +746,7 @@ public class CatalogService {
             Set<String> matchedSongIds = new HashSet<>();
             for (Track t : existingTracks) {
                 String clean = cleanTrackTitle(t.getTitle());
-                Map<String, Object> matchedCat = findBestCatalogMatch(clean, catalogRows);
+                Map<String, Object> matchedCat = findBestCatalogMatch(clean, t.getLengthMilliseconds(), catalogRows);
                 if (matchedCat != null) {
                     String songId = (String) matchedCat.get("song_id");
                     matchedSongIds.add(songId);
@@ -708,10 +762,11 @@ public class CatalogService {
                 String songId = (String) row.get("song_id");
                 if (!matchedSongIds.contains(songId)) {
                     String cleanTitle = cleanTrackTitle((String) row.get("title"));
+                    Integer dur = row.get("duration") != null ? ((Number) row.get("duration")).intValue() : null;
                     boolean alreadyPresent = existingTracks.stream()
-                            .anyMatch(et -> cleanTrackTitle(et.getTitle()).equalsIgnoreCase(cleanTitle));
+                            .anyMatch(et -> cleanTrackTitle(et.getTitle()).equalsIgnoreCase(cleanTitle)
+                                    || CatalogNormalizationUtils.isTrackFuzzyMatch(et.getTitle(), et.getLengthMilliseconds(), cleanTitle, dur));
                     if (!alreadyPresent) {
-                        Integer dur = row.get("duration") != null ? ((Number) row.get("duration")).intValue() : null;
                         Track extra = new Track("yt-trk:" + songId, cleanTitle, nextPos++, dur != null ? dur * 1000 : null, album);
                         extra.setYoutubeVideoId(songId);
                         toAdd.add(extra);
@@ -764,9 +819,42 @@ public class CatalogService {
             return mbResponse != null ? mbResponse : new MusicBrainzReleaseSearchResponse(0, Collections.emptyList());
         }
 
-        // 1. Fetch all albums from youtube_catalog for this artist
-        String sql = "SELECT album, count(*) as track_count FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) GROUP BY album";
-        List<Map<String, Object>> catalogRows = jdbcTemplate.queryForList(sql, artistName);
+        // 1. Fetch all albums from youtube_catalog for this artist and aliases
+        Set<String> artistVariants = new LinkedHashSet<>();
+        artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(artistName));
+        if (artistId != null && !artistId.startsWith("yt-")) {
+            try {
+                List<Artist> mbidArtists = artistRepository.findAllByMusicBrainzId(artistId);
+                for (Artist a : mbidArtists) {
+                    if (a.getName() != null) {
+                        artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(a.getName()));
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        try {
+            String catArtistSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(artist) LIKE LOWER(?) OR LOWER(artist) LIKE LOWER(?)";
+            String prefix = artistName.length() >= 4 ? artistName.substring(0, 4) + "%" : artistName + "%";
+            List<String> foundCatArtists = jdbcTemplate.query(catArtistSql, (rs, rowNum) -> rs.getString("artist"), artistName, prefix);
+            for (String fca : foundCatArtists) {
+                if (fca != null && CatalogNormalizationUtils.isArtistMatch(artistName, fca)) {
+                    artistVariants.add(fca);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        List<Map<String, Object>> catalogRows = new ArrayList<>();
+        Set<String> seenCatalogAlbums = new HashSet<>();
+        for (String varArtist : artistVariants) {
+            String sql = "SELECT album, count(*) as track_count FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) GROUP BY album";
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, varArtist);
+            for (Map<String, Object> row : rows) {
+                String album = (String) row.get("album");
+                if (album != null && !album.isBlank() && seenCatalogAlbums.add(album.toLowerCase().trim())) {
+                    catalogRows.add(row);
+                }
+            }
+        }
         Map<String, Map<String, Object>> catalogMap = new LinkedHashMap<>();
         for (Map<String, Object> row : catalogRows) {
             String album = (String) row.get("album");
@@ -1096,6 +1184,14 @@ public class CatalogService {
                 List<Integer> list = jdbcTemplate.query(sql, (rs, rowNum) -> 1, artistName.trim());
                 if (!list.isEmpty()) {
                     return true;
+                }
+                Set<String> variants = CatalogNormalizationUtils.generateArtistVariants(artistName);
+                for (String v : variants) {
+                    if (v.equalsIgnoreCase(artistName)) continue;
+                    List<Integer> vList = jdbcTemplate.query(sql, (rs, rowNum) -> 1, v.trim());
+                    if (!vList.isEmpty()) {
+                        return true;
+                    }
                 }
             } catch (Exception ex) {
                 log.debug("isArtistAvailable check failed for [{}]: {}", artistName, ex.getMessage());

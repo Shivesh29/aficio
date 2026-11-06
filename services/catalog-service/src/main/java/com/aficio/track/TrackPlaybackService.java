@@ -38,12 +38,15 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.aficio.catalog.CatalogNormalizationUtils;
+import com.aficio.catalog.CatalogService;
 
 @Service
 public class TrackPlaybackService {
@@ -100,6 +103,13 @@ public class TrackPlaybackService {
 
     // Distinct album IDs synced via YouTube API per client identifier (in-memory fallback)
     private final ConcurrentHashMap<String, Set<Long>> clientSyncedAlbums = new ConcurrentHashMap<>();
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.aficio.artist.ArtistRepository artistRepository;
+
+    public void setArtistRepository(com.aficio.artist.ArtistRepository artistRepository) {
+        this.artistRepository = artistRepository;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public TrackPlaybackService(
@@ -719,9 +729,71 @@ public class TrackPlaybackService {
             if (title.isBlank() || artistName == null || artistName.isBlank()) return null;
 
             String albumTitle = (album != null && album.getTitle() != null) ? album.getTitle().trim() : "";
+            String cleanAlb = CatalogService.cleanAlbumTitleStatic(albumTitle);
 
-            // Query youtube_catalog: Match on artist and title, preferring matching album name
-            // Uses B-tree index idx_yt_cat_artist_title (LOWER(artist), LOWER(title)) in ~0.5ms!
+            // 1. Gather artist variants (MBID aliases, transliteration & vowel variants, and catalog candidates)
+            Set<String> artistVariants = new LinkedHashSet<>();
+            artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(artistName));
+            if (album != null && album.getArtist() != null && album.getArtist().getMusicBrainzId() != null && artistRepository != null) {
+                try {
+                    List<com.aficio.artist.Artist> mbidArtists = artistRepository.findAllByMusicBrainzId(album.getArtist().getMusicBrainzId());
+                    for (com.aficio.artist.Artist a : mbidArtists) {
+                        if (a.getName() != null) {
+                            artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(a.getName()));
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // 2. High-precision Album Level Resolution (0 quota units)
+            // If album title is present, fetch the album's catalog tracklist and match via duration + phonetic title
+            if (!albumTitle.isBlank()) {
+                try {
+                    String candSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)";
+                    List<String> candArtists = jdbcTemplate.query(candSql, (rs, rowNum) -> rs.getString("artist"), albumTitle, cleanAlb);
+                    for (String cand : candArtists) {
+                        if (cand != null && (CatalogNormalizationUtils.isArtistMatch(artistName, cand)
+                                || artistVariants.stream().anyMatch(v -> CatalogNormalizationUtils.isArtistMatch(v, cand)))) {
+                            artistVariants.add(cand);
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                String albSql = "SELECT song_id, title, duration, artist FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND (LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?))";
+                List<Map<String, Object>> albumCatalogRows = Collections.emptyList();
+                String matchedArtist = artistName;
+                for (String variant : artistVariants) {
+                    albumCatalogRows = jdbcTemplate.queryForList(albSql, variant, albumTitle, cleanAlb);
+                    if (!albumCatalogRows.isEmpty()) {
+                        matchedArtist = variant;
+                        break;
+                    }
+                }
+
+                if (!albumCatalogRows.isEmpty()) {
+                    for (Map<String, Object> crow : albumCatalogRows) {
+                        String rawTitle = (String) crow.get("title");
+                        Integer durSec = crow.get("duration") != null ? ((Number) crow.get("duration")).intValue() : null;
+                        if (CatalogNormalizationUtils.isTrackFuzzyMatch(title, track.getLengthMilliseconds(), rawTitle, durSec)) {
+                            String videoId = (String) crow.get("song_id");
+                            if (videoId != null && !videoId.isBlank()) {
+                                videoId = videoId.trim();
+                                track.setYoutubeVideoId(videoId);
+                                trackRepository.save(track);
+                                log.info("Found YouTube video ID [{}] for track [{}] by [{}] via album catalog matching (0 quota units)",
+                                        videoId, track.getTitle(), artistName);
+
+                                if (album != null && album.getId() != null) {
+                                    populateSiblingTracksFromCatalog(album, matchedArtist);
+                                }
+                                return videoId;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback: Search youtube_catalog across artist variants by title
             String sql = """
                 SELECT song_id FROM youtube_catalog
                 WHERE LOWER(artist) = LOWER(?)
@@ -730,63 +802,57 @@ public class TrackPlaybackService {
                 LIMIT 1
             """;
 
-            List<String> results = jdbcTemplate.query(
-                    sql,
-                    (rs, rowNum) -> rs.getString("song_id"),
-                    artistName, title, albumTitle, albumTitle
-            );
+            String patternSql = """
+                SELECT song_id FROM youtube_catalog
+                WHERE LOWER(artist) = LOWER(?)
+                  AND (
+                    LOWER(title) LIKE LOWER(?) || ' (%'
+                    OR LOWER(title) LIKE LOWER(?) || ' - %'
+                    OR LOWER(title) LIKE '% / ' || LOWER(?) || '%'
+                    OR LOWER(title) LIKE '%' || LOWER(?) || ' / %'
+                  )
+                ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
+                LIMIT 1
+            """;
 
-            // If not found with exact title, try normalized/cleaned title if different
-            // e.g. "Song Name (2011 Remaster)" -> "Song Name"
-            if (results.isEmpty()) {
-                String normalized = normalizeTitleForCatalog(title);
-                if (!normalized.equalsIgnoreCase(title) && !normalized.isBlank()) {
+            String normalized = normalizeTitleForCatalog(title);
+            String cleanBase = normalizeTitleForCatalog(title);
+
+            for (String variant : artistVariants) {
+                List<String> results = jdbcTemplate.query(
+                        sql,
+                        (rs, rowNum) -> rs.getString("song_id"),
+                        variant, title, albumTitle, albumTitle
+                );
+
+                if (results.isEmpty() && !normalized.equalsIgnoreCase(title) && !normalized.isBlank()) {
                     results = jdbcTemplate.query(
                             sql,
                             (rs, rowNum) -> rs.getString("song_id"),
-                            artistName, normalized, albumTitle, albumTitle
+                            variant, normalized, albumTitle, albumTitle
                     );
                 }
-            }
 
-            // If still not found, try prefix and compound search e.g. "If You Must" -> "If You Must (Demo)"
-            // or "Fairies Wear Boots" -> "Jack the Stripper / Fairies Wear Boots"
-            if (results.isEmpty()) {
-                String cleanBase = normalizeTitleForCatalog(title);
-                if (!cleanBase.isBlank()) {
-                    String patternSql = """
-                        SELECT song_id FROM youtube_catalog
-                        WHERE LOWER(artist) = LOWER(?)
-                          AND (
-                            LOWER(title) LIKE LOWER(?) || ' (%'
-                            OR LOWER(title) LIKE LOWER(?) || ' - %'
-                            OR LOWER(title) LIKE '% / ' || LOWER(?) || '%'
-                            OR LOWER(title) LIKE '%' || LOWER(?) || ' / %'
-                          )
-                        ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
-                        LIMIT 1
-                    """;
+                if (results.isEmpty() && !cleanBase.isBlank()) {
                     results = jdbcTemplate.query(
                             patternSql,
                             (rs, rowNum) -> rs.getString("song_id"),
-                            artistName, cleanBase, cleanBase, cleanBase, cleanBase, albumTitle, albumTitle
+                            variant, cleanBase, cleanBase, cleanBase, cleanBase, albumTitle, albumTitle
                     );
                 }
-            }
 
-            if (!results.isEmpty() && results.get(0) != null && !results.get(0).isBlank()) {
-                String videoId = results.get(0).trim();
-                track.setYoutubeVideoId(videoId);
-                trackRepository.save(track);
-                log.info("Found YouTube video ID [{}] for track [{}] by [{}] via LAION-DISCO-12M catalog (0 quota units)",
-                        videoId, track.getTitle(), artistName);
+                if (!results.isEmpty() && results.get(0) != null && !results.get(0).isBlank()) {
+                    String videoId = results.get(0).trim();
+                    track.setYoutubeVideoId(videoId);
+                    trackRepository.save(track);
+                    log.info("Found YouTube video ID [{}] for track [{}] by [{}] via LAION-DISCO-12M catalog (0 quota units)",
+                            videoId, track.getTitle(), variant);
 
-                // Opportunistically populate sibling tracks in this album from youtube_catalog
-                if (album != null && album.getId() != null) {
-                    populateSiblingTracksFromCatalog(album, artistName);
+                    if (album != null && album.getId() != null) {
+                        populateSiblingTracksFromCatalog(album, variant);
+                    }
+                    return videoId;
                 }
-
-                return videoId;
             }
         } catch (Exception ex) {
             log.warn("Failed to query youtube_catalog for track [{}]: {}", track.getTitle(), ex.getMessage());
@@ -809,68 +875,101 @@ public class TrackPlaybackService {
             if (missingTracks.isEmpty()) return;
 
             String albumTitle = album.getTitle() != null ? album.getTitle().trim() : "";
+            String cleanAlb = CatalogService.cleanAlbumTitleStatic(albumTitle);
+
+            // Fetch catalog tracks for this album
+            Set<String> artistVariants = new LinkedHashSet<>();
+            artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(artistName));
+            if (album.getArtist() != null && album.getArtist().getMusicBrainzId() != null && artistRepository != null) {
+                try {
+                    List<com.aficio.artist.Artist> mbidArtists = artistRepository.findAllByMusicBrainzId(album.getArtist().getMusicBrainzId());
+                    for (com.aficio.artist.Artist a : mbidArtists) {
+                        if (a.getName() != null) {
+                            artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(a.getName()));
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            try {
+                String candSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)";
+                List<String> candArtists = jdbcTemplate.query(candSql, (rs, rowNum) -> rs.getString("artist"), albumTitle, cleanAlb);
+                for (String cand : candArtists) {
+                    if (cand != null && (CatalogNormalizationUtils.isArtistMatch(artistName, cand)
+                            || artistVariants.stream().anyMatch(v -> CatalogNormalizationUtils.isArtistMatch(v, cand)))) {
+                        artistVariants.add(cand);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            List<Map<String, Object>> albumCatalogRows = Collections.emptyList();
+            String albSql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND (LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?))";
+            for (String variant : artistVariants) {
+                albumCatalogRows = jdbcTemplate.queryForList(albSql, variant, albumTitle, cleanAlb);
+                if (!albumCatalogRows.isEmpty()) {
+                    break;
+                }
+            }
 
             int populatedCount = 0;
+            List<Track> toSave = new ArrayList<>();
+            Set<String> usedSongIds = new HashSet<>();
+            albumTracks.forEach(t -> {
+                if (t.getYoutubeVideoId() != null && !t.getYoutubeVideoId().isBlank()) {
+                    usedSongIds.add(t.getYoutubeVideoId().trim());
+                }
+            });
+
             for (Track t : missingTracks) {
                 String title = t.getTitle() != null ? t.getTitle().trim() : "";
                 if (title.isBlank()) continue;
 
-                String sql = """
-                    SELECT song_id FROM youtube_catalog
-                    WHERE LOWER(artist) = LOWER(?)
-                      AND LOWER(title) = LOWER(?)
-                    ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
-                    LIMIT 1
-                """;
-
-                List<String> results = jdbcTemplate.query(
-                        sql,
-                        (rs, rowNum) -> rs.getString("song_id"),
-                        artistName, title, albumTitle, albumTitle
-                );
-
-                if (results.isEmpty()) {
-                    String normalized = normalizeTitleForCatalog(title);
-                    if (!normalized.equalsIgnoreCase(title) && !normalized.isBlank()) {
-                        results = jdbcTemplate.query(
-                                sql,
-                                (rs, rowNum) -> rs.getString("song_id"),
-                                artistName, normalized, albumTitle, albumTitle
-                        );
+                // 1. Match from album catalog rows with duration + fuzzy phonetic
+                String matchedVid = null;
+                for (Map<String, Object> crow : albumCatalogRows) {
+                    String songId = (String) crow.get("song_id");
+                    if (songId == null || usedSongIds.contains(songId)) continue;
+                    String rawTitle = (String) crow.get("title");
+                    Integer durSec = crow.get("duration") != null ? ((Number) crow.get("duration")).intValue() : null;
+                    if (CatalogNormalizationUtils.isTrackFuzzyMatch(title, t.getLengthMilliseconds(), rawTitle, durSec)) {
+                        matchedVid = songId;
+                        break;
                     }
                 }
 
-                if (results.isEmpty()) {
-                    String cleanBase = normalizeTitleForCatalog(title);
-                    if (!cleanBase.isBlank()) {
-                        String patternSql = """
-                            SELECT song_id FROM youtube_catalog
-                            WHERE LOWER(artist) = LOWER(?)
-                              AND (
-                                LOWER(title) LIKE LOWER(?) || ' (%'
-                                OR LOWER(title) LIKE LOWER(?) || ' - %'
-                                OR LOWER(title) LIKE '% / ' || LOWER(?) || '%'
-                                OR LOWER(title) LIKE '%' || LOWER(?) || ' / %'
-                              )
-                            ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
-                            LIMIT 1
-                        """;
-                        results = jdbcTemplate.query(
-                                patternSql,
-                                (rs, rowNum) -> rs.getString("song_id"),
-                                artistName, cleanBase, cleanBase, cleanBase, cleanBase, albumTitle, albumTitle
-                        );
+                // 2. If not matched in album catalog rows, try fallback queries across catalog
+                if (matchedVid == null) {
+                    String sql = """
+                        SELECT song_id FROM youtube_catalog
+                        WHERE LOWER(artist) = LOWER(?)
+                          AND LOWER(title) = LOWER(?)
+                        ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
+                        LIMIT 1
+                    """;
+                    for (String variant : artistVariants) {
+                        List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("song_id"), variant, title, albumTitle, albumTitle);
+                        if (results.isEmpty()) {
+                            String normalized = normalizeTitleForCatalog(title);
+                            if (!normalized.equalsIgnoreCase(title) && !normalized.isBlank()) {
+                                results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("song_id"), variant, normalized, albumTitle, albumTitle);
+                            }
+                        }
+                        if (!results.isEmpty() && results.get(0) != null && !results.get(0).isBlank()) {
+                            matchedVid = results.get(0).trim();
+                            break;
+                        }
                     }
                 }
 
-                if (!results.isEmpty() && results.get(0) != null && !results.get(0).isBlank()) {
-                    t.setYoutubeVideoId(results.get(0).trim());
-                    trackRepository.save(t);
+                if (matchedVid != null && !matchedVid.isBlank()) {
+                    t.setYoutubeVideoId(matchedVid.trim());
+                    usedSongIds.add(matchedVid.trim());
+                    toSave.add(t);
                     populatedCount++;
                 }
             }
 
-            if (populatedCount > 0) {
+            if (!toSave.isEmpty()) {
+                trackRepository.saveAll(toSave);
                 log.info("Batch populated {}/{} missing sibling tracks for album [{}] from youtube_catalog (0 units)",
                         populatedCount, missingTracks.size(), album.getTitle());
             }
@@ -1515,6 +1614,15 @@ public class TrackPlaybackService {
             if (matchCount == significantWords.size()) {
                 return true;
             }
+            if (significantWords.size() >= 3 && (double) matchCount / significantWords.size() >= 0.75) {
+                return true;
+            }
+        }
+
+        // Transliteration & phonetic match for regional / romanized Indic titles
+        if (CatalogNormalizationUtils.isTrackFuzzyMatch(trackTitle, null, cleanedVideo, null)
+                || CatalogNormalizationUtils.isTrackFuzzyMatch(trackTitle, null, videoTitle, null)) {
+            return true;
         }
 
         return false;

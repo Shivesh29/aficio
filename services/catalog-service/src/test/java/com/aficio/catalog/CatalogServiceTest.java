@@ -319,4 +319,37 @@ public class CatalogServiceTest {
         assertThat(result.getTitle()).isEqualTo("evermore");
         assertThat(result.getMusicBrainzId()).isEqualTo(canonicalReleaseId);
     }
+
+    @Test
+    void shouldReconcileTracksUsingDurationAndPhoneticTransliteration() {
+        Artist artist = new Artist("Satinder Sartaj", "mbid-sartaj");
+        Album album = new Album("Sartaaj", "mbid-album-sartaaj", artist);
+        org.springframework.test.util.ReflectionTestUtils.setField(album, "id", 159L);
+
+        Track track2 = new Track("mb-trk-2", "Pani Panjan Daryawan Wala", 2, 522983, album);
+        Track track7 = new Track("mb-trk-7", "Gall Tajurbe Wali", 7, 275156, album);
+        List<Track> existingTracks = List.of(track2, track7);
+
+        when(trackRepository.findByAlbumIdOrderByPosition(159L)).thenReturn(existingTracks);
+
+        // Query with any casing of "Satinder Sartaaj" returns catalog tracks
+        List<Map<String, Object>> catalogRows = List.of(
+                Map.of("song_id", "aoNwMD01Oqk", "title", "Paani Panja Dariyanwan Da", "duration", 523),
+                Map.of("song_id", "0hr3IwRt8HU", "title", "Gal Tazrabe Wali", "duration", 276)
+        );
+        org.mockito.Mockito.lenient().when(jdbcTemplate.queryForList(anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    String a = invocation.getArgument(1);
+                    if (a != null && a.equalsIgnoreCase("satinder sartaaj")) {
+                        return catalogRows;
+                    }
+                    return Collections.emptyList();
+                });
+
+        List<Track> reconciled = catalogService.reconcileTracksWithDataset(album);
+
+        assertThat(reconciled).hasSize(2);
+        assertThat(track2.getYoutubeVideoId()).isEqualTo("aoNwMD01Oqk");
+        assertThat(track7.getYoutubeVideoId()).isEqualTo("0hr3IwRt8HU");
+    }
 }

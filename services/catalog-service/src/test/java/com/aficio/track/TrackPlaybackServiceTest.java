@@ -405,5 +405,23 @@ public class TrackPlaybackServiceTest {
         assertThat(fanScore).isGreaterThan(vevoScore);
         assertThat(officialScore).isLessThan(0); // Penalized
     }
+
+    @Test
+    void shouldMatchIndicTransliteratedTrackTitles() {
+        String artist = "Satinder Sartaaj";
+        String album = "Sartaaj";
+
+        assertThat(trackPlaybackService.isTrackTitleMatch(
+                "Pani Panjan Daryawan Wala",
+                "Satinder Sartaaj - Paani Panja Dariyanwan Da",
+                artist, album
+        )).isTrue();
+
+        assertThat(trackPlaybackService.isTrackTitleMatch(
+                "Gall Tajurbe Wali",
+                "Satinder Sartaaj - Gal Tazrabe Wali",
+                artist, album
+        )).isTrue();
+    }
 }
 

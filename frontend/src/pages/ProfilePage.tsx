@@ -267,7 +267,7 @@ export const ProfilePage = () => {
               </span>
             )}
             {profile.isPrivate && (
-              <span className="profile-role-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(230, 161, 71, 0.15)', color: 'var(--accent-gold)' }}>
+              <span className="profile-role-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: 'var(--bg-surface-elevated)', color: 'var(--accent-gold)', border: '1px solid var(--border-subtle)' }}>
                 <Lock size={12} />
                 <span>Private</span>
               </span>
@@ -430,14 +430,14 @@ export const ProfilePage = () => {
           style={{
             margin: '1.5rem 0',
             padding: '1.25rem',
-            background: 'var(--aficio-surface-card, #1c1917)',
+            background: 'var(--bg-surface)',
             borderRadius: '12px',
-            border: '1px solid var(--aficio-border, #292524)',
+            border: '1px solid var(--border-subtle)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
             <Clock size={18} className="text-gold" />
-            <strong style={{ fontSize: '1rem', color: 'var(--aficio-text)' }}>
+            <strong style={{ fontSize: '1rem', color: 'var(--text-main)' }}>
               Follow Requests ({pendingRequests.length})
             </strong>
           </div>
@@ -450,9 +450,9 @@ export const ProfilePage = () => {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '0.75rem 1rem',
-                  background: 'var(--aficio-surface, #0c0a09)',
+                  background: 'var(--bg-surface-elevated)',
                   borderRadius: '8px',
-                  border: '1px solid var(--aficio-border, #292524)',
+                  border: '1px solid var(--border-subtle)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -673,8 +673,8 @@ export const ProfilePage = () => {
                   <p>Loading community...</p>
                 </div>
               ) : socialModalError ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--aficio-text-secondary)' }}>
-                  <Lock size={32} style={{ margin: '0 auto 0.75rem auto', color: 'var(--aficio-gold, #eab308)' }} />
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  <Lock size={32} style={{ margin: '0 auto 0.75rem auto', color: 'var(--accent-gold)' }} />
                   <p>{socialModalError}</p>
                 </div>
               ) : socialUsers.length === 0 ? (
@@ -721,7 +721,7 @@ export const ProfilePage = () => {
               
               {!twoFactorSetupData ? (
                 <div style={{ textAlign: 'center' }}>
-                  <p style={{ marginBottom: '1rem', color: 'var(--aficio-text-secondary)' }}>You can enable or disable 2FA for your account here.</p>
+                  <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>You can enable or disable 2FA for your account here.</p>
                   <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
                     <button className="btn-primary" onClick={handleStart2faSetup} disabled={is2faSubmitting}>
                       {is2faSubmitting ? 'Starting...' : 'Enable 2FA'}
@@ -733,7 +733,7 @@ export const ProfilePage = () => {
                         value={twoFactorCode} 
                         onChange={e => setTwoFactorCode(e.target.value)} 
                         className="form-field input"
-                        style={{ padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--aficio-border)' }}
+                        style={{ padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}
                       />
                       <button className="btn-secondary" onClick={handleDisable2fa} disabled={is2faSubmitting || !twoFactorCode}>
                         Disable 2FA
@@ -745,7 +745,7 @@ export const ProfilePage = () => {
                 <div style={{ textAlign: 'center' }}>
                   <p style={{ marginBottom: '1rem' }}>Scan this QR code with your authenticator app.</p>
                   <img src={twoFactorSetupData.qrCodeUri} alt="2FA QR Code" style={{ border: '4px solid white', borderRadius: '8px', marginBottom: '1rem' }} />
-                  <p style={{ marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--aficio-text-secondary)' }}>Or enter this secret manually: <strong>{twoFactorSetupData.secret}</strong></p>
+                  <p style={{ marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Or enter this secret manually: <strong>{twoFactorSetupData.secret}</strong></p>
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
                     <input 
@@ -754,7 +754,7 @@ export const ProfilePage = () => {
                       value={twoFactorCode} 
                       onChange={e => setTwoFactorCode(e.target.value)} 
                       maxLength={6}
-                      style={{ padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--aficio-border)', width: '100%', maxWidth: '200px', textAlign: 'center' }}
+                      style={{ padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--border-subtle)', width: '100%', maxWidth: '200px', textAlign: 'center' }}
                     />
                     <button className="btn-primary" onClick={handleEnable2fa} disabled={is2faSubmitting || twoFactorCode.length < 6}>
                       {is2faSubmitting ? 'Verifying...' : 'Verify & Enable'}

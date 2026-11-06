@@ -7,22 +7,23 @@
 }
 
 .verify-email-container {
-  background-color: var(--aficio-surface);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 2rem;
   max-width: 500px;
   width: 100%;
   text-align: center;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
 }
 
 .verify-email-container h2 {
   margin-bottom: 1.5rem;
-  color: var(--aficio-primary);
+  color: var(--accent-gold);
 }
 
 .verify-loading p {
-  color: var(--aficio-text-secondary);
+  color: var(--text-muted);
 }
 
 .success-message {

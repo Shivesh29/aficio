@@ -865,9 +865,9 @@ export const AlbumDetailPage = () => {
                                   fontSize: '0.65rem',
                                   padding: '1px 6px',
                                   borderRadius: '999px',
-                                  background: 'rgba(229, 169, 59, 0.15)',
+                                  background: 'var(--bg-surface-elevated)',
                                   color: 'var(--accent-gold)',
-                                  border: '1px solid rgba(229, 169, 59, 0.3)',
+                                  border: '1px solid var(--border-subtle)',
                                   fontWeight: 700,
                                   textTransform: 'uppercase',
                                   letterSpacing: '0.04em'

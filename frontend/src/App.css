@@ -7,7 +7,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #000000;
+  background-color: var(--bg-base);
   color: var(--text-main);
 }
 
@@ -103,9 +103,9 @@
 
 .nav-link.active {
   color: #fff;
-  background: rgba(229, 169, 59, 0.16);
-  border: 1px solid rgba(229, 169, 59, 0.35);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: none;
 }
 
 .nav-link.active::after {
@@ -1171,8 +1171,8 @@
   }
 
   .mobile-quick-star-strip {
-    background: var(--bg-surface, #12141c);
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
     border-radius: 10px;
     padding: 0.35rem 0.5rem;
     display: flex;
@@ -1223,8 +1223,8 @@
     align-items: center;
     justify-content: center;
     gap: 0.3rem;
-    background: var(--bg-surface, #12141c);
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
     border-radius: 10px;
     color: var(--text-main, #f1f5f9);
     font-size: 0.78rem;
@@ -1235,7 +1235,7 @@
   }
 
   .mobile-action-pill-btn:active {
-    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+    background: var(--bg-surface-hover);
   }
 
   /* Segmented Tabs */
@@ -1244,7 +1244,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-subtle);
     border-radius: 12px;
     padding: 3px;
     gap: 4px;
@@ -1267,9 +1267,9 @@
   }
 
   .mobile-tab-btn.is-active-tab {
-    background: var(--bg-surface-elevated, #1a1d28);
+    background: var(--bg-surface-elevated);
     color: #fff;
-    border: 1px solid rgba(229, 169, 59, 0.35);
+    border: 1px solid var(--border-medium);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
 
@@ -2076,7 +2076,8 @@
 }
 
 .profile-role-badge {
-  background: rgba(230, 161, 71, 0.15);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
   color: var(--accent-gold);
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -2952,7 +2953,7 @@
 
 .site-footer {
   border-top: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  background: #000000;
   padding: 4rem 2rem 2.5rem;
   margin-top: auto;
 }
@@ -3085,9 +3086,9 @@
 /* Enhanced Feed Loading Deck */
 .feed-loading-deck {
   padding: 5.5rem 2rem;
-  background: radial-gradient(circle at center, rgba(229, 169, 59, 0.05) 0%, transparent 70%);
+  background: var(--bg-surface);
   border-radius: var(--radius-xl, 16px);
-  border: 1px dashed rgba(229, 169, 59, 0.2);
+  border: 1px dashed var(--border-medium);
   margin: 2rem auto;
   max-width: 650px;
 }
@@ -3257,12 +3258,12 @@
 }
 
 .artist-hero-section {
-  background: linear-gradient(135deg, rgba(212, 175, 55, 0.08) 0%, rgba(18, 18, 22, 0.85) 100%);
-  border: 1px solid var(--border-medium);
+  background: linear-gradient(180deg, #242424 0%, #181818 100%);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 2.25rem 2.5rem;
   margin-bottom: 2rem;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px);
 }
 
@@ -3527,10 +3528,10 @@
   font-size: 0.8rem;
   font-family: var(--font-mono);
   color: var(--accent-gold);
-  background: rgba(230, 161, 71, 0.1);
+  background: var(--bg-surface-elevated);
   padding: 0.35rem 0.75rem;
   border-radius: 9999px;
-  border: 1px solid rgba(230, 161, 71, 0.25);
+  border: 1px solid var(--border-subtle);
 }
 
 /* Visibility Badges */
@@ -3591,8 +3592,8 @@
 }
 
 .visibility-option-card.selected {
-  border-color: var(--accent-gold);
-  background: rgba(230, 161, 71, 0.06);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--bg-surface-hover);
 }
 
 .visibility-option-icon {
@@ -4040,11 +4041,11 @@
 .queue-count-badge {
   font-size: 0.65rem;
   font-weight: 700;
-  background: rgba(229, 169, 59, 0.2);
+  background: var(--bg-surface-elevated);
   color: var(--accent-gold, #e5a93b);
   padding: 0.1rem 0.45rem;
   border-radius: 10px;
-  border: 1px solid rgba(229, 169, 59, 0.3);
+  border: 1px solid var(--border-medium);
 }
 
 .queue-close-btn {
@@ -4089,7 +4090,7 @@
 }
 
 .queue-track-item.is-active-track {
-  background: rgba(229, 169, 59, 0.12);
+  background: rgba(255, 255, 255, 0.08);
   border-left: 3px solid var(--accent-gold, #e5a93b);
 }
 
@@ -4257,9 +4258,9 @@
 }
 
 .miniplayer-badge.mb-badge {
-  background: rgba(229, 169, 59, 0.18);
-  color: #e5a93b;
-  border: 1px solid rgba(229, 169, 59, 0.35);
+  background: var(--bg-surface-elevated);
+  color: var(--accent-gold);
+  border: 1px solid var(--border-medium);
 }
 
 .miniplayer-badge.instant-badge {
@@ -4536,7 +4537,7 @@
 
 .action-btn.is-active {
   color: var(--accent-gold, #e5a93b);
-  background: rgba(229, 169, 59, 0.15);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .action-btn.close-btn:hover {
@@ -4577,7 +4578,7 @@
 
 /* Track Row Playing State & Equalizer in Album Detail */
 .track-item-row.is-playing-row {
-  background: rgba(229, 169, 59, 0.08) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
   border-left: 3px solid var(--accent-gold, #e5a93b);
   padding-left: calc(0.85rem - 3px);
 }
@@ -4858,7 +4859,7 @@
 }
 
 .album-detail-page .track-item-row.is-playing-row {
-  background: rgba(230, 161, 71, 0.08) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
   border-left: 3px solid var(--accent-gold);
   padding-left: calc(1rem - 3px);
 }
@@ -5014,7 +5015,7 @@
     transform: translate(-50%, -50%);
     width: 8px;
     height: 8px;
-    background: var(--bg-base, #0c0d12);
+    background: #000;
     border: 1.5px solid rgba(255, 255, 255, 0.85);
     border-radius: 50%;
     z-index: 2;
@@ -5450,9 +5451,9 @@
 }
 
 .tier-tag.dev {
-  background: rgba(229, 169, 59, 0.14);
+  background: var(--bg-surface-elevated);
   color: var(--accent-gold);
-  border: 1px solid rgba(229, 169, 59, 0.35);
+  border: 1px solid var(--border-medium);
 }
 
 .tier-tag.custom {
@@ -5633,9 +5634,9 @@
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  background: rgba(230, 161, 71, 0.15);
+  background: var(--bg-surface-elevated);
   color: var(--accent-gold);
-  border: 1px solid rgba(230, 161, 71, 0.3);
+  border: 1px solid var(--border-medium);
   padding: 0.1rem 0.5rem;
   border-radius: 100px;
   font-size: 0.72rem;
@@ -5784,8 +5785,8 @@
 }
 
 .privacy-selector-card.is-selected {
-  background: rgba(229, 169, 59, 0.04);
-  border-color: var(--accent-gold);
+  background: var(--bg-surface-hover);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .selector-radio {
@@ -6256,14 +6257,14 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.65rem 1.15rem;
-  background: linear-gradient(135deg, rgba(217, 119, 6, 0.95), rgba(180, 83, 9, 0.95));
+  background: var(--bg-surface-elevated);
   color: #fff;
   border-radius: 12px;
   margin-bottom: 0.6rem;
   font-size: 0.82rem;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(245, 158, 11, 0.4);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
   animation: slideUpFade 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  border: 1px solid var(--border-medium);
   backdrop-filter: blur(12px);
 }
 
@@ -6301,9 +6302,9 @@
 
 /* MiniPlayer Badges */
 .miniplayer-badge.discovery-badge {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--bg-surface-elevated);
+  color: var(--accent-gold);
+  border: 1px solid var(--border-medium);
   font-size: 0.68rem;
   font-weight: 700;
   padding: 0.15rem 0.45rem;
@@ -6515,8 +6516,8 @@
 }
 
 .storage-option-card.active {
-  border-color: var(--accent-gold);
-  background: rgba(230, 161, 71, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--bg-surface-hover);
 }
 
 .storage-option-radio {
@@ -6881,9 +6882,9 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: rgba(229, 169, 59, 0.15);
-  border: 1px solid rgba(229, 169, 59, 0.4);
-  color: var(--accent-gold);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-medium);
+  color: var(--text-main);
   font-size: 0.78rem;
   font-weight: 600;
   padding: 0.35rem 0.75rem;
@@ -6895,6 +6896,7 @@
 .btn-play-sm:hover {
   background: var(--accent-gold);
   color: #0c0d10;
+  border-color: var(--accent-gold);
 }
 
 .feed-card-body {
@@ -6911,8 +6913,8 @@
   font-size: 0.72rem;
   font-family: var(--font-mono);
   color: var(--accent-gold);
-  background: rgba(229, 169, 59, 0.1);
-  border: 1px solid rgba(229, 169, 59, 0.2);
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
   padding: 0.25rem 0.55rem;
   border-radius: var(--radius-full);
   margin-bottom: 0.75rem;
@@ -7026,9 +7028,14 @@
 }
 
 .feed-subfilter-btn.active {
-  background: rgba(229, 169, 59, 0.14);
-  color: var(--accent-gold);
-  border-color: rgba(229, 169, 59, 0.4);
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+.feed-subfilter-btn.active .feed-subfilter-count {
+  background: rgba(0, 0, 0, 0.15);
+  color: #000000;
 }
 
 .feed-subfilter-count {
@@ -7156,8 +7163,8 @@
   max-width: 460px;
   padding: 1.85rem;
   border-radius: var(--radius-lg, 12px);
-  background: var(--bg-surface, #141416);
-  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.12));
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-medium);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75), 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
@@ -7191,9 +7198,9 @@
 }
 
 .confirm-modal-icon-badge.badge-primary {
-  background: rgba(212, 163, 89, 0.12);
-  color: var(--accent-gold, #d4a359);
-  border: 1px solid rgba(212, 163, 89, 0.25);
+  background: var(--bg-surface);
+  color: var(--accent-gold);
+  border: 1px solid var(--border-medium);
 }
 
 .confirm-modal-text {
@@ -7241,8 +7248,8 @@
    QUICK STAR RATING WIDGET (DOSSIER)
    ========================================================================== */
 .dossier-star-rating-box {
-  background: var(--bg-surface, #141416);
-  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.12));
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-md, 8px);
   padding: 0.85rem 1rem;
   display: flex;
@@ -7252,12 +7259,12 @@
 }
 
 .dossier-star-rating-box:hover {
-  border-color: rgba(229, 169, 59, 0.35);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 .dossier-star-rating-box.rated {
-  border-color: rgba(229, 169, 59, 0.3);
-  background: linear-gradient(180deg, rgba(229, 169, 59, 0.05) 0%, var(--bg-surface, #141416) 100%);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--bg-surface-elevated);
 }
 
 .star-rating-header {
@@ -7318,7 +7325,7 @@
 
 .quick-star-btn:hover:not(:disabled) {
   transform: scale(1.25);
-  background: rgba(229, 169, 59, 0.12);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .quick-star-btn:disabled {

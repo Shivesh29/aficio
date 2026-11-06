@@ -1365,40 +1365,54 @@ public class TrackPlaybackService {
             return null;
         }
         try {
-            String suffix = preferUnofficial ? "lyrics" : "audio";
-            String q = (artistName + " " + trackTitle + " " + (albumTitle != null ? albumTitle : "") + " " + suffix).trim();
-            String encoded = URLEncoder.encode(q, StandardCharsets.UTF_8);
-            String url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q="
-                    + encoded + "&key=" + effectiveApiKey;
+            List<String> queryCandidates = new ArrayList<>();
+            if (preferUnofficial) {
+                queryCandidates.add((artistName + " " + trackTitle + " lyrics").trim());
+                if (albumTitle != null && !albumTitle.isBlank()) {
+                    queryCandidates.add((artistName + " " + trackTitle + " " + albumTitle + " lyrics").trim());
+                }
+            } else {
+                // Direct query without cluttering: yields official Topic or artist uploads as #1 result
+                queryCandidates.add((artistName + " " + trackTitle).trim());
+                if (albumTitle != null && !albumTitle.isBlank()) {
+                    queryCandidates.add((artistName + " " + trackTitle + " " + albumTitle).trim());
+                }
+            }
 
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
+            for (String q : queryCandidates) {
+                String encoded = URLEncoder.encode(q, StandardCharsets.UTF_8);
+                String url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q="
+                        + encoded + "&key=" + effectiveApiKey;
 
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200 && resp.body() != null) {
-                JsonNode root = objectMapper.readTree(resp.body());
-                JsonNode items = root.path("items");
-                if (items.isArray()) {
-                    for (JsonNode it : items) {
-                        String vid = it.path("id").path("videoId").asText();
-                        String vTitle = it.path("snippet").path("title").asText();
-                        String channelTitle = it.path("snippet").path("channelTitle").asText().toLowerCase();
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(6))
+                        .GET()
+                        .build();
 
-                        if (vid.isBlank() || isRestrictedVideoId(vid)) {
-                            continue;
-                        }
+                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() == 200 && resp.body() != null) {
+                    JsonNode root = objectMapper.readTree(resp.body());
+                    JsonNode items = root.path("items");
+                    if (items.isArray()) {
+                        for (JsonNode it : items) {
+                            String vid = it.path("id").path("videoId").asText();
+                            String vTitle = it.path("snippet").path("title").asText();
+                            String channelTitle = it.path("snippet").path("channelTitle").asText().toLowerCase();
 
-                        if (preferUnofficial && (channelTitle.contains("topic") || channelTitle.contains("vevo"))) {
-                            continue;
-                        }
+                            if (vid.isBlank() || isRestrictedVideoId(vid)) {
+                                continue;
+                            }
 
-                        if (isTrackTitleMatch(trackTitle, vTitle, artistName, albumTitle)) {
-                            log.info("Found single track video ID [{}] (\"{}\") for track [{}] via YouTube Data API search (preferUnofficial: {})",
-                                    vid, vTitle, trackTitle, preferUnofficial);
-                            return vid;
+                            if (preferUnofficial && (channelTitle.contains("topic") || channelTitle.contains("vevo"))) {
+                                continue;
+                            }
+
+                            if (isTrackTitleMatch(trackTitle, vTitle, artistName, albumTitle)) {
+                                log.info("Found single track video ID [{}] (\"{}\") for track [{}] via YouTube Data API search (preferUnofficial: {})",
+                                        vid, vTitle, trackTitle, preferUnofficial);
+                                return vid;
+                            }
                         }
                     }
                 }

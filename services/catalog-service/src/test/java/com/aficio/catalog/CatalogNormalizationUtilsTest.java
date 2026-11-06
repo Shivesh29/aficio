@@ -44,6 +44,12 @@ public class CatalogNormalizationUtilsTest {
                 "Sai Ve", 518
         )).isTrue();
 
+        // "Sab Te Laagu" (285.6s ~ 286s) vs "Sabh Te Laggu" (286s)
+        assertThat(CatalogNormalizationUtils.isTrackFuzzyMatch(
+                "Sab Te Laagu", 285651,
+                "Sabh Te Laggu", 286
+        )).isTrue();
+
         // Western albums: Smells Like Teen Spirit vs Smells Like Teen Spirit
         assertThat(CatalogNormalizationUtils.isTrackFuzzyMatch(
                 "Smells Like Teen Spirit", 301000,
@@ -61,3 +67,4 @@ public class CatalogNormalizationUtilsTest {
         assertThat(p2).contains("pani");
     }
 }
+

@@ -41,6 +41,9 @@ public final class CatalogNormalizationUtils {
         s = s.replace('q', 'k');
         s = s.replace('w', 'v');
 
+        // Collapse aspirated consonants common in Indic transliteration (e.g. bh -> b in sabh/sab, dh -> d, kh -> k, jh -> j, gh -> g)
+        s = s.replaceAll("([bdgkj])h", "$1");
+
         // Double vowels collapsed to single
         s = s.replaceAll("aa+", "a");
         s = s.replaceAll("ee+|ii+", "i");

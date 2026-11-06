@@ -422,6 +422,12 @@ public class TrackPlaybackServiceTest {
                 "Satinder Sartaaj - Gal Tazrabe Wali",
                 artist, album
         )).isTrue();
+
+        assertThat(trackPlaybackService.isTrackTitleMatch(
+                "Sab Te Laagu",
+                "Sabh Te Laggu",
+                artist, album
+        )).isTrue();
     }
 }
 

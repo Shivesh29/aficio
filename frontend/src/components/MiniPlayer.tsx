@@ -16,7 +16,6 @@ import {
   VolumeX,
   ListMusic,
   AlertCircle,
-  Sparkles
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -44,8 +43,6 @@ export const MiniPlayer: React.FC = () => {
     queue,
     currentAlbum,
     error,
-    discoveryNotice,
-    dismissDiscoveryNotice,
     iframeRef,
     togglePlay,
     seekTo,
@@ -211,34 +208,11 @@ export const MiniPlayer: React.FC = () => {
         </div>
       </div>
 
-      {/* Error / Quota Notice Banner */}
+      {/* Playback Error Banner */}
       {error && (
         <div className="miniplayer-error-dock-banner">
           <AlertCircle size={15} className="error-icon" />
           <span className="error-message-text">{error}</span>
-          {error.includes('Settings') && (
-            <Link to="/settings" className="error-settings-link">
-              Settings &rarr;
-            </Link>
-          )}
-        </div>
-      )}
-
-      {/* Discovery Quota Notice Banner */}
-      {discoveryNotice && (
-        <div className="miniplayer-discovery-dock-banner">
-          <Sparkles size={15} className="discovery-icon" />
-          <span className="discovery-message-text">
-            <strong>New Album Discovered!</strong> Used 1 of your {discoveryNotice.limit} daily options ({discoveryNotice.remaining} remaining today{discoveryNotice.limit > 5 ? ' on personal key' : ''}). Permanently cached for everyone to replay anytime!
-          </span>
-          <button
-            type="button"
-            className="discovery-dismiss-btn"
-            onClick={dismissDiscoveryNotice}
-            title="Dismiss notice"
-          >
-            <X size={13} />
-          </button>
         </div>
       )}
 

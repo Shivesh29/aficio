@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 import { api } from '../api/client';
-import { Disc3, Search, MessageSquare, LogOut, Bookmark, PlusCircle, Bell, Activity, Settings } from 'lucide-react';
+import { Disc3, Search, MessageSquare, LogOut, Bookmark, PlusCircle, Bell, Activity, Settings, Key, Copy, Check } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { formatNotificationTime } from '../utils/date';
 
@@ -10,7 +10,34 @@ export const Navbar = () => {
   const location = useLocation();
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadDmCount, setUnreadDmCount] = useState(0);
+  const [copiedNavbarCode, setCopiedNavbarCode] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyMyListenerCode = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user?.listenerCode) return;
+    const shareKey = user.isPrivate ? user.listenerCode : user.username;
+    const url = `${window.location.origin}/u/${shareKey}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setCopiedNavbarCode(true);
+        setTimeout(() => setCopiedNavbarCode(false), 2500);
+      }).catch(() => {
+        setCopiedNavbarCode(true);
+        setTimeout(() => setCopiedNavbarCode(false), 2500);
+      });
+    } else {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedNavbarCode(true);
+      setTimeout(() => setCopiedNavbarCode(false), 2500);
+    }
+  };
 
   const isActive = (path: string) => {
     if (path === '/' && location.pathname === '/') return true;
@@ -140,12 +167,30 @@ export const Navbar = () => {
                   </div>
                 )}
               </div>
-              <Link to={`/u/${user.username}`} className="user-profile-chip" title="View your profile">
+              <Link to={`/u/${user.isPrivate && user.listenerCode ? user.listenerCode : user.username}`} className="user-profile-chip" title="View your profile">
                 <span className="user-avatar-initial">
                   {user.username.charAt(0).toUpperCase()}
                 </span>
                 <span className="user-name-text">{user.username}</span>
               </Link>
+              {user.listenerCode && (
+                <button
+                  type="button"
+                  className="navbar-listener-chip"
+                  onClick={handleCopyMyListenerCode}
+                  title="Click to copy your private Listener profile link"
+                >
+                  <Key size={12} style={{ color: 'var(--accent-gold)' }} />
+                  <span className="navbar-listener-code-text">{user.listenerCode}</span>
+                  {copiedNavbarCode ? (
+                    <span style={{ color: '#10b981', fontSize: '0.72rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                      <Check size={12} /> Copied!
+                    </span>
+                  ) : (
+                    <Copy size={11} style={{ opacity: 0.7 }} />
+                  )}
+                </button>
+              )}
               <Link to="/settings" className="icon-action-btn" title="Account settings" aria-label="Account settings">
                 <Settings size={16} />
               </Link>

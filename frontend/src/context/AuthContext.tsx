@@ -48,6 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             avatarUrl: me.avatarUrl,
             isPrivate: me.isPrivate,
             twoFactorEnabled: me.twoFactorEnabled,
+            listenerCode: me.listenerCode,
           });
         } catch {
           clearStoredToken();
@@ -160,6 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         avatarUrl: me.avatarUrl,
         isPrivate: me.isPrivate,
         twoFactorEnabled: me.twoFactorEnabled,
+        listenerCode: me.listenerCode,
       });
     } catch {
       setUser({ id: 0, username });
@@ -183,6 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         avatarUrl: me.avatarUrl,
         isPrivate: me.isPrivate,
         twoFactorEnabled: me.twoFactorEnabled,
+        listenerCode: me.listenerCode,
       });
     } catch {
       // ignore

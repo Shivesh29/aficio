@@ -1,7 +1,6 @@
 // API Client for Aficio Backend
 
 const TOKEN_KEY = 'aficio_jwt_token';
-export const YOUTUBE_API_KEY_STORAGE = 'aficio_custom_youtube_api_key';
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -15,28 +14,8 @@ export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-export function getCustomYouTubeApiKey(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(YOUTUBE_API_KEY_STORAGE);
-}
-
-export function setCustomYouTubeApiKey(key: string) {
-  if (typeof window === 'undefined') return;
-  if (key && key.trim()) {
-    localStorage.setItem(YOUTUBE_API_KEY_STORAGE, key.trim());
-  } else {
-    localStorage.removeItem(YOUTUBE_API_KEY_STORAGE);
-  }
-}
-
-export function clearCustomYouTubeApiKey() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(YOUTUBE_API_KEY_STORAGE);
-}
-
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const token = getStoredToken();
-  const customYtKey = getCustomYouTubeApiKey();
   const headers = new Headers(options.headers || {});
 
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -47,15 +26,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  if (customYtKey) {
-    headers.set('X-YouTube-API-Key', customYtKey);
-  }
-
   const response = await fetch(url, { ...options, headers });
   const text = await response.text();
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 || (response.status === 403 && token && !url.includes('/users/login') && !url.includes('/users/register'))) {
       clearStoredToken();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('aficio:unauthorized'));
@@ -128,6 +103,21 @@ export interface TrackPlaybackResponse {
   dailyDiscoveriesUsed?: number;
   dailyDiscoveriesLimit?: number;
   remainingDiscoveries?: number;
+  quotaUnitsUsedThisRequest?: number;
+  quotaActionDetails?: string;
+  totalSystemSearchesToday?: number;
+  totalSystemUnitsToday?: number;
+}
+
+export interface QuotaAuditEvent {
+  timestamp: string;
+  action: string;
+  target: string;
+  query: string;
+  units: number;
+  isSearchQuery: boolean;
+  success: boolean;
+  outcomeDetails?: string;
 }
 
 export interface UserQuotaResponse {
@@ -139,6 +129,11 @@ export interface UserQuotaResponse {
   remaining: number;
   isExhausted: boolean;
   unlimited: boolean;
+  systemSearchesToday?: number;
+  systemSearchesLimit?: number;
+  systemUnitsToday?: number;
+  systemUnitsLimit?: number;
+  recentQuotaEvents?: QuotaAuditEvent[];
 }
 
 export interface UserApiKeyStatusResponse {
@@ -155,6 +150,7 @@ export interface User {
   bio?: string;
   avatarUrl?: string;
   isPrivate?: boolean;
+  listenerCode?: string;
 }
 
 export interface UserProfile {
@@ -168,6 +164,7 @@ export interface UserProfile {
   followingCount: number;
   reviewsCount: number;
   listsCount: number;
+  listenerCode?: string;
 }
 
 export interface UserSettings {
@@ -178,6 +175,7 @@ export interface UserSettings {
   avatarUrl?: string;
   isPrivate: boolean;
   twoFactorEnabled: boolean;
+  listenerCode?: string;
 }
 
 export interface UpdateSettingsRequest {
@@ -345,7 +343,16 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ email }),
       }),
-    me: () => request<{ id: number; username: string; email: string; displayName?: string; bio?: string; avatarUrl?: string; isPrivate: boolean; twoFactorEnabled: boolean }>('/users/me'),
+    searchUsers: (query: string) =>
+      request<Array<{
+        id: number;
+        username: string;
+        displayName?: string;
+        bio?: string;
+        avatarUrl?: string;
+        isPrivate: boolean;
+      }>>(`/users/search?query=${encodeURIComponent(query)}`),
+    me: () => request<{ id: number; username: string; email: string; displayName?: string; bio?: string; avatarUrl?: string; isPrivate: boolean; twoFactorEnabled: boolean; listenerCode?: string }>('/users/me'),
     verify2fa: (code: string, tempToken: string) =>
       request<{ token: string; requires2fa: boolean }>('/users/2fa/verify', {
         method: 'POST',
@@ -407,41 +414,19 @@ export const api = {
     getAlbumById: (id: number | string, username?: string) =>
       request<Album>(`/albums/${id}${username ? `?username=${encodeURIComponent(username)}` : ''}`),
     getTracks: (albumId: number | string) => request<Track[]>(`/tracks?albumId=${albumId}`),
-    getTrackPlayback: (trackId: number | string) => {
-      const customKey = getCustomYouTubeApiKey();
-      const headers: Record<string, string> = {};
-      if (customKey) {
-        headers['X-YouTube-API-Key'] = customKey;
-      }
-      const queryParam = customKey ? `?apiKey=${encodeURIComponent(customKey)}` : '';
-      return request<TrackPlaybackResponse>(`/tracks/${trackId}/playback${queryParam}`, { headers });
-    },
-    getUserQuota: () => {
-      const customKey = getCustomYouTubeApiKey();
-      const headers: Record<string, string> = {};
-      if (customKey) {
-        headers['X-YouTube-API-Key'] = customKey;
-      }
-      const queryParam = customKey ? `?apiKey=${encodeURIComponent(customKey)}` : '';
-      return request<UserQuotaResponse>(`/catalog/quota${queryParam}`, { headers });
-    },
+    getTrackPlayback: (trackId: number | string) =>
+      request<TrackPlaybackResponse>(`/tracks/${trackId}/playback`),
+    getUserQuota: () =>
+      request<UserQuotaResponse>('/catalog/quota'),
     updateTrackYoutubeId: (trackId: number | string, youtubeVideoId: string) =>
       request<void>(`/tracks/${trackId}/youtube-video-id`, {
         method: 'PUT',
         body: JSON.stringify({ youtubeVideoId }),
       }),
-    reportTrackRestricted: (trackId: number | string) => {
-      const customKey = getCustomYouTubeApiKey();
-      const headers: Record<string, string> = {};
-      if (customKey) {
-        headers['X-YouTube-API-Key'] = customKey;
-      }
-      const queryParam = customKey ? `?apiKey=${encodeURIComponent(customKey)}` : '';
-      return request<TrackPlaybackResponse>(`/tracks/${trackId}/report-restricted${queryParam}`, {
+    reportTrackRestricted: (trackId: number | string) =>
+      request<TrackPlaybackResponse>(`/tracks/${trackId}/report-restricted`, {
         method: 'POST',
-        headers,
-      });
-    },
+      }),
     syncAlbum: (musicBrainzId: string) =>
       request<Album>(`/albums/${musicBrainzId}/sync`, { method: 'POST' }),
     searchMusicBrainz: (query: string, type: 'album' | 'artist' | 'track' | 'artist-releases') =>

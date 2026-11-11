@@ -3,11 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   api,
   type UserSettings,
-  type UserQuotaResponse,
-  type UserApiKeyStatusResponse,
-  getCustomYouTubeApiKey,
-  setCustomYouTubeApiKey,
-  clearCustomYouTubeApiKey,
 } from '../api/client';
 import { useAuth } from '../context/useAuth';
 import {
@@ -25,20 +20,15 @@ import {
   Check,
   X,
   Key,
-  ExternalLink,
-  Sparkles,
-  Radio,
-  Laptop,
-  Cloud,
-  ChevronDown,
-  ChevronUp,
+  Copy,
+  Share2,
 } from 'lucide-react';
 
 export const SettingsPage = () => {
   const { user, isAuthenticated, logout, refreshUser, openAuthModal } = useAuth();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'streaming' | 'security'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security'>('profile');
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,6 +40,57 @@ export const SettingsPage = () => {
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [copiedListenerCode, setCopiedListenerCode] = useState(false);
+  const [copiedProfileUrl, setCopiedProfileUrl] = useState(false);
+
+  const activeListenerCode = settings?.listenerCode || user?.listenerCode;
+
+  const handleCopyListenerCode = () => {
+    if (!activeListenerCode) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(activeListenerCode).then(() => {
+        setCopiedListenerCode(true);
+        setTimeout(() => setCopiedListenerCode(false), 2500);
+      }).catch(() => {
+        setCopiedListenerCode(true);
+        setTimeout(() => setCopiedListenerCode(false), 2500);
+      });
+    } else {
+      const input = document.createElement('input');
+      input.value = activeListenerCode;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedListenerCode(true);
+      setTimeout(() => setCopiedListenerCode(false), 2500);
+    }
+  };
+
+  const handleCopyProfileUrl = () => {
+    const code = settings?.listenerCode || user?.listenerCode;
+    const shareKey = isPrivate && code ? code : (settings?.username || user?.username);
+    if (!shareKey) return;
+    const url = `${window.location.origin}/u/${shareKey}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setCopiedProfileUrl(true);
+        setTimeout(() => setCopiedProfileUrl(false), 2500);
+      }).catch(() => {
+        setCopiedProfileUrl(true);
+        setTimeout(() => setCopiedProfileUrl(false), 2500);
+      });
+    } else {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedProfileUrl(true);
+      setTimeout(() => setCopiedProfileUrl(false), 2500);
+    }
+  };
 
   // Username form
   const [newUsername, setNewUsername] = useState('');
@@ -57,15 +98,6 @@ export const SettingsPage = () => {
   const [usernameMsg, setUsernameMsg] = useState('');
   const [usernameError, setUsernameError] = useState('');
 
-  // YouTube API Key (BYOK) & Storage Location
-  const [personalApiKey, setPersonalApiKey] = useState(() => getCustomYouTubeApiKey() || '');
-  const [showPersonalApiKey, setShowPersonalApiKey] = useState(false);
-  const [storagePreference, setStoragePreference] = useState<'LOCAL' | 'CLOUD'>('LOCAL');
-  const [cloudKeyStatus, setCloudKeyStatus] = useState<UserApiKeyStatusResponse | null>(null);
-  const [showConsentDetails, setShowConsentDetails] = useState(false);
-  const [isSavingKey, setIsSavingKey] = useState(false);
-  const [apiKeySuccess, setApiKeySuccess] = useState('');
-  const [apiKeyError, setApiKeyError] = useState('');
 
   // Password form
   const [currentPassword, setCurrentPassword] = useState('');
@@ -89,7 +121,6 @@ export const SettingsPage = () => {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
-  const [quota, setQuota] = useState<UserQuotaResponse | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -109,15 +140,6 @@ export const SettingsPage = () => {
       setBio(data.bio || '');
       setAvatarUrl(data.avatarUrl || '');
       setIsPrivate(data.isPrivate);
-      api.catalog.getUserQuota().then((q) => setQuota(q)).catch(() => {});
-      api.auth.getApiKeyStatus().then((status) => {
-        setCloudKeyStatus(status);
-        if (status.hasCloudKey) {
-          setStoragePreference('CLOUD');
-        } else if (getCustomYouTubeApiKey()) {
-          setStoragePreference('LOCAL');
-        }
-      }).catch(() => {});
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
@@ -180,90 +202,6 @@ export const SettingsPage = () => {
     }
   };
 
-  const handleSaveApiKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setApiKeySuccess('');
-    setApiKeyError('');
-    setIsSavingKey(true);
-
-    const trimmed = personalApiKey.trim();
-
-    try {
-      if (storagePreference === 'LOCAL') {
-        if (!trimmed) {
-          clearCustomYouTubeApiKey();
-          setPersonalApiKey('');
-          const updated = await api.auth.saveApiKey('', 'LOCAL');
-          setCloudKeyStatus(updated);
-          setApiKeySuccess('Personal API key removed. Restored system shared quota.');
-          api.catalog.getUserQuota().then(setQuota).catch(() => {});
-          return;
-        }
-
-        if (!trimmed.startsWith('AIzaSy')) {
-          setApiKeyError('Invalid format. Official Google Cloud API keys start with "AIzaSy".');
-          setIsSavingKey(false);
-          return;
-        }
-
-        setCustomYouTubeApiKey(trimmed);
-        const updated = await api.auth.saveApiKey('', 'LOCAL');
-        setCloudKeyStatus(updated);
-        setApiKeySuccess('Key saved privately in your local browser storage (Zero-Knowledge).');
-      } else {
-        // CLOUD STORAGE
-        if (!trimmed && !cloudKeyStatus?.hasCloudKey) {
-          setApiKeyError('Please enter your Google Cloud API key before saving.');
-          setIsSavingKey(false);
-          return;
-        }
-
-        if (!trimmed && cloudKeyStatus?.hasCloudKey) {
-          setApiKeySuccess('Active in Encrypted Cloud Vault.');
-          setIsSavingKey(false);
-          return;
-        }
-
-        if (!trimmed.startsWith('AIzaSy')) {
-          setApiKeyError('Invalid format. Official Google Cloud API keys start with "AIzaSy".');
-          setIsSavingKey(false);
-          return;
-        }
-
-        const updated = await api.auth.saveApiKey(trimmed, 'CLOUD');
-        setCloudKeyStatus(updated);
-        clearCustomYouTubeApiKey();
-        setPersonalApiKey('');
-        setApiKeySuccess('Key encrypted with AES-256-GCM and saved to your Aficio account. Synced across all your devices!');
-      }
-
-      api.catalog.getUserQuota().then(setQuota).catch(() => {});
-    } catch (err) {
-      setApiKeyError(err instanceof Error ? err.message : 'Failed to save API key');
-    } finally {
-      setIsSavingKey(false);
-    }
-  };
-
-  const handleClearApiKey = async () => {
-    setIsSavingKey(true);
-    setApiKeySuccess('');
-    setApiKeyError('');
-    try {
-      clearCustomYouTubeApiKey();
-      setPersonalApiKey('');
-      if (cloudKeyStatus?.hasCloudKey) {
-        await api.auth.deleteApiKey();
-        setCloudKeyStatus(null);
-      }
-      setApiKeySuccess('API key removed from storage. Restored system shared quota.');
-      api.catalog.getUserQuota().then(setQuota).catch(() => {});
-    } catch (err) {
-      setApiKeyError(err instanceof Error ? err.message : 'Failed to remove API key');
-    } finally {
-      setIsSavingKey(false);
-    }
-  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -366,23 +304,6 @@ export const SettingsPage = () => {
     );
   }
 
-  const isDevTier = Boolean(
-    settings?.email?.toLowerCase().includes('sharmashivesh29') ||
-    settings?.username?.toLowerCase() === 'shivesh' ||
-    settings?.username?.toLowerCase() === 'sharmashivesh29' ||
-    user?.email?.toLowerCase().includes('sharmashivesh29') ||
-    user?.username?.toLowerCase() === 'shivesh' ||
-    user?.username?.toLowerCase() === 'sharmashivesh29'
-  );
-
-  const hasPersonalKey = Boolean(
-    isDevTier ||
-    personalApiKey.trim() ||
-    cloudKeyStatus?.hasCloudKey ||
-    quota?.hasCustomKey ||
-    (storagePreference === 'CLOUD' && cloudKeyStatus?.hasCloudKey)
-  );
-
   return (
     <div className="settings-container">
       {/* ─── Page Header ─── */}
@@ -429,19 +350,6 @@ export const SettingsPage = () => {
 
             <button
               type="button"
-              className={`settings-nav-item ${activeTab === 'streaming' ? 'active' : ''}`}
-              onClick={() => setActiveTab('streaming')}
-            >
-              <Key size={18} className="nav-item-icon" />
-              <div className="nav-item-text">
-                <span className="nav-item-title">Streaming & API Keys</span>
-                <span className="nav-item-sub">YouTube quota & BYOK</span>
-              </div>
-              {hasPersonalKey && <span className="nav-item-status-dot active" title="Personal key active" />}
-            </button>
-
-            <button
-              type="button"
               className={`settings-nav-item ${activeTab === 'security' ? 'active' : ''}`}
               onClick={() => setActiveTab('security')}
             >
@@ -453,27 +361,6 @@ export const SettingsPage = () => {
               {settings.twoFactorEnabled && <span className="nav-item-status-dot active" title="2FA enabled" />}
             </button>
           </nav>
-
-          {/* Account Playback Tier Card */}
-          <div className="settings-sidebar-tier-card">
-            <div className="tier-header-row">
-              <span className="tier-label">PLAYBACK TIER</span>
-              {isDevTier ? (
-                <span className="tier-tag dev">DEVELOPER</span>
-              ) : hasPersonalKey ? (
-                <span className="tier-tag custom">BYOK ACTIVE</span>
-              ) : (
-                <span className="tier-tag standard">STANDARD</span>
-              )}
-            </div>
-            <p className="tier-desc">
-              {isDevTier
-                ? 'Unlimited playback & queries (sharmashivesh29)'
-                : hasPersonalKey
-                ? 'Private Google Cloud quota (10k units/day ~99 albums)'
-                : '5 complete album stream discoveries'}
-            </p>
-          </div>
         </aside>
 
         {/* Right Content Pane */}
@@ -566,7 +453,7 @@ export const SettingsPage = () => {
                           setUsernameError('');
                           setUsernameMsg('');
                         }}
-                        placeholder="e.g. shivesh"
+                        placeholder="e.g. musiclover"
                         maxLength={30}
                         className="settings-input"
                       />
@@ -658,9 +545,45 @@ export const SettingsPage = () => {
                           <Lock size={16} />
                           <strong>Private Profile</strong>
                         </div>
-                        <p>Only followers you explicitly approve can view your activity and lists.</p>
+                        <p>Only followers you explicitly approve can view your activity, network, and lists. Private accounts are hidden from discovery and community search.</p>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Unique Listener Code & Direct Sharing */}
+                <div className="settings-field">
+                  <label>Your Listener Code & Direct Sharing</label>
+                  <div className="listener-code-settings-card">
+                    <div className="listener-code-settings-top">
+                      <div className="listener-code-digits-wrap">
+                        <Key size={16} style={{ color: 'var(--accent-gold)' }} />
+                        <span className="listener-code-number">{activeListenerCode || 'AF-XXXX-XXXX'}</span>
+                      </div>
+                      <div className="listener-code-settings-actions">
+                        <button
+                          type="button"
+                          className="btn-secondary-sm"
+                          onClick={handleCopyListenerCode}
+                          title="Copy your random Listener Code"
+                        >
+                          {copiedListenerCode ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
+                          <span>{copiedListenerCode ? 'Copied' : 'Copy Code'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary-sm"
+                          onClick={handleCopyProfileUrl}
+                          title="Copy direct profile link"
+                        >
+                          {copiedProfileUrl ? <Check size={13} style={{ color: '#10b981' }} /> : <Share2 size={13} />}
+                          <span>{copiedProfileUrl ? 'Link Copied' : 'Copy Link'}</span>
+                        </button>
+                      </div>
+                    </div>
+                    <p className="settings-field-hint" style={{ marginTop: '0.65rem' }}>
+                      <strong>How sharing works:</strong> When your account is private, you are completely hidden from public username and display name search results. Friends can find and follow you by pasting your random Listener Code into Search or opening your direct profile link.
+                    </p>
                   </div>
                 </div>
 
@@ -687,293 +610,7 @@ export const SettingsPage = () => {
             </div>
           )}
 
-          {/* ─── TAB 2: Streaming & API Keys ─── */}
-          {activeTab === 'streaming' && (
-            <div className="settings-pane-card">
-              <div className="pane-header">
-                <div>
-                  <h2>Playback Quota & API Key</h2>
-                  <p>Configure YouTube Data API access to enable seamless album streaming and discoveries.</p>
-                </div>
-              </div>
-
-              <div className="settings-form">
-                {/* Quota Summary Card */}
-                <div className="quota-summary-card">
-                  <div className="quota-summary-badge">
-                    {isDevTier ? (
-                      <Sparkles size={20} className="tier-icon-dev" />
-                    ) : hasPersonalKey ? (
-                      <Key size={20} className="tier-icon-custom" />
-                    ) : (
-                      <Radio size={20} className="tier-icon-standard" />
-                    )}
-                  </div>
-                  <div className="quota-summary-content">
-                    <div className="quota-title-row">
-                      <h3>
-                        {isDevTier
-                          ? 'Developer Tier • Unlimited Discovery'
-                          : hasPersonalKey
-                          ? 'Personal Google Cloud Key Active'
-                          : 'Standard Tier • 5 Shared Albums'}
-                      </h3>
-                      <span className="quota-status-pill active">Active</span>
-                    </div>
-                    <p>
-                      {isDevTier
-                        ? 'Your account (sharmashivesh29) has developer bypass privileges with unlimited search queries.'
-                        : hasPersonalKey
-                        ? 'Streaming is powered by your private 10,000 requests/day quota (~99 daily album discoveries).'
-                        : 'Standard accounts share the public server quota for up to 4 new album discoveries per day. Connect your free personal API key below for 99 daily discoveries.'}
-                    </p>
-
-                    {quota && !quota.unlimited && (
-                      <div className="settings-quota-meter">
-                        <div className="meter-labels">
-                          <span>Today's New Album Discoveries</span>
-                          <strong>{quota.usedToday} / {quota.dailyLimit} Used</strong>
-                        </div>
-                        <div className="settings-quota-track">
-                          <div
-                            className={`settings-quota-fill ${quota.isExhausted ? 'exhausted' : quota.usedToday >= (quota.dailyLimit * 0.8) ? 'warning' : ''}`}
-                            style={{ width: `${Math.min(100, (quota.usedToday / quota.dailyLimit) * 100)}%` }}
-                          />
-                        </div>
-                        <div className="meter-subnote">
-                          {quota.isExhausted ? (
-                            <span className="meter-exhausted-text">
-                              {hasPersonalKey
-                                ? 'Daily personal API key quota reached (99/99 albums). Resets at midnight Pacific Time. All catalogued and cached albums remain 100% free to replay anytime.'
-                                : `Daily discovery limit reached (${quota.dailyLimit}/${quota.dailyLimit} albums). Resets at midnight UTC. All catalogued and cached albums remain 100% free to replay anytime.`}
-                            </span>
-                          ) : (
-                            <span>
-                              {quota.remaining} new album {quota.remaining === 1 ? 'discovery' : 'discoveries'} remaining today ({hasPersonalKey ? '10k Google Cloud quota' : 'shared server quota'}). Replaying already-catalogued albums is always free and unlimited.
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Storage Choice Selector */}
-                <div className="storage-choice-section">
-                  <div className="storage-choice-header">
-                    <h4>Choose Key Storage Location</h4>
-                    <p>Select where your personal Google Cloud API key will be kept based on your privacy and convenience preferences.</p>
-                  </div>
-
-                  <div className="storage-options-grid">
-                    {/* Option 1: Local Browser */}
-                    <div
-                      className={`storage-option-card ${storagePreference === 'LOCAL' ? 'active' : ''}`}
-                      onClick={() => setStoragePreference('LOCAL')}
-                    >
-                      <div className="storage-option-radio">
-                        <div className={`radio-dot ${storagePreference === 'LOCAL' ? 'selected' : ''}`} />
-                      </div>
-                      <div className="storage-option-content">
-                        <div className="storage-option-title-row">
-                          <Laptop size={18} className="text-emerald" />
-                          <h5>Local Browser Only</h5>
-                          <span className="storage-badge privacy">Highest Privacy</span>
-                        </div>
-                        <p className="storage-option-desc">
-                          Kept exclusively inside your browser's local sandbox (<code>localStorage</code>). Never stored on our backend databases at rest.
-                        </p>
-                        <ul className="storage-option-bullets">
-                          <li>✓ Zero database footprint & zero server-side leak risk</li>
-                          <li>✗ Device-specific (will not sync across other computers or phones)</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Option 2: Encrypted Cloud Vault */}
-                    <div
-                      className={`storage-option-card ${storagePreference === 'CLOUD' ? 'active' : ''}`}
-                      onClick={() => setStoragePreference('CLOUD')}
-                    >
-                      <div className="storage-option-radio">
-                        <div className={`radio-dot ${storagePreference === 'CLOUD' ? 'selected' : ''}`} />
-                      </div>
-                      <div className="storage-option-content">
-                        <div className="storage-option-title-row">
-                          <Cloud size={18} className="text-cyan" />
-                          <h5>Encrypted Cloud Vault</h5>
-                          <span className="storage-badge encrypted">AES-256-GCM</span>
-                        </div>
-                        <p className="storage-option-desc">
-                          Stored securely on your Aficio account, encrypted at rest using authenticated AES-256-GCM.
-                        </p>
-                        <ul className="storage-option-bullets">
-                          <li>✓ Seamlessly syncs across all your devices (desktop, phone, tablet)</li>
-                          <li>✓ Hardware-standard AEAD encryption with per-record Initialization Vectors</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Informed Consent Disclosure Accordion */}
-                  <div className="informed-consent-box">
-                    <button
-                      type="button"
-                      className="informed-consent-toggle"
-                      onClick={() => setShowConsentDetails(!showConsentDetails)}
-                    >
-                      <div className="consent-toggle-left">
-                        <ShieldCheck size={16} className="text-cyan" />
-                        <span>Informed Consent & Cryptographic Security Guarantee</span>
-                      </div>
-                      {showConsentDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
-
-                    {showConsentDetails && (
-                      <div className="informed-consent-body">
-                        <p>
-                          We believe in total transparency. Before providing your personal Google Cloud API key, here is exactly how your data is handled:
-                        </p>
-                        <div className="consent-points-list">
-                          <div className="consent-point">
-                            <strong>1. Authenticated Encryption at Rest (AES-256-GCM)</strong>
-                            <span>If Cloud Vault is selected, your key is encrypted in PostgreSQL using Galois/Counter Mode (AES-256-GCM) with 128-bit authentication tags and unique 12-byte cryptographically secure random IVs. It is never stored in plaintext in the database.</span>
-                          </div>
-                          <div className="consent-point">
-                            <strong>2. Single-Purpose Scope of Use</strong>
-                            <span>Your key is utilized exclusively by the backend playback resolver to query YouTube's official Data API v3 (<code>search.list</code>) to discover official music video identifiers for full albums.</span>
-                          </div>
-                          <div className="consent-point">
-                            <strong>3. Zero Third-Party Sharing or Monetization</strong>
-                            <span>Your key is never shared, sold, logged in plain text, or exposed to other users or external third parties.</span>
-                          </div>
-                          <div className="consent-point">
-                            <strong>4. Instant Revocation & Deletion</strong>
-                            <span>You can delete your key or switch back to Local Browser Storage at any moment. Doing so immediately purges the ciphertext from PostgreSQL and flushes all Redis in-memory caches.</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* API Key Form */}
-                <form onSubmit={handleSaveApiKey} className="api-key-form-section">
-                  <div className="settings-field">
-                    <label htmlFor="settings-personal-api-key">
-                      {storagePreference === 'CLOUD'
-                        ? 'Google Cloud YouTube Data API v3 Key (Cloud Encrypted)'
-                        : 'Google Cloud YouTube Data API v3 Key (Local Browser)'}
-                    </label>
-                    <div className="input-with-action">
-                      <input
-                        id="settings-personal-api-key"
-                        type={showPersonalApiKey ? 'text' : 'password'}
-                        value={personalApiKey}
-                        onChange={(e) => setPersonalApiKey(e.target.value)}
-                        placeholder={
-                          storagePreference === 'CLOUD' && cloudKeyStatus?.hasCloudKey
-                            ? cloudKeyStatus.maskedKey || '••••••••••••••••••••••••••••••••'
-                            : 'AIzaSy...'
-                        }
-                        className="settings-input font-mono"
-                        autoComplete="off"
-                      />
-                      <button
-                        type="button"
-                        className="input-action-btn"
-                        onClick={() => setShowPersonalApiKey(!showPersonalApiKey)}
-                        title={showPersonalApiKey ? 'Hide key' : 'Show key'}
-                      >
-                        {showPersonalApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-
-                    <div className="settings-hint">
-                      {storagePreference === 'CLOUD' && cloudKeyStatus?.hasCloudKey ? (
-                        <span className="text-cyan">
-                          ✓ Active Cloud Key: <code>{cloudKeyStatus.maskedKey}</code> (AES-256-GCM encrypted in account). Enter a new key above only if you wish to replace it.
-                        </span>
-                      ) : storagePreference === 'LOCAL' && getCustomYouTubeApiKey() ? (
-                        <span className="text-emerald">
-                          ✓ Active Local Key: Saved in this browser's local sandbox.
-                        </span>
-                      ) : (
-                        <span>
-                          {storagePreference === 'CLOUD'
-                            ? 'Your key will be encrypted with AES-256-GCM before saving to your Aficio account.'
-                            : 'Your key remains local in your browser and will never touch our database.'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {apiKeySuccess && (
-                    <div className="settings-alert-banner success">
-                      <Check size={16} />
-                      <span>{apiKeySuccess}</span>
-                    </div>
-                  )}
-                  {apiKeyError && (
-                    <div className="settings-alert-banner error">
-                      <AlertTriangle size={16} />
-                      <span>{apiKeyError}</span>
-                    </div>
-                  )}
-
-                  <div className="settings-footer-actions">
-                    <button type="submit" className="btn-primary" disabled={isSavingKey}>
-                      {isSavingKey ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      <span>Save & Apply Preference</span>
-                    </button>
-                    {(getCustomYouTubeApiKey() || cloudKeyStatus?.hasCloudKey) && (
-                      <button
-                        type="button"
-                        onClick={handleClearApiKey}
-                        className="btn-secondary"
-                        disabled={isSavingKey}
-                      >
-                        <Trash2 size={16} />
-                        <span>Remove Key</span>
-                      </button>
-                    )}
-                  </div>
-                </form>
-
-                <div className="settings-divider" />
-
-                {/* Free Setup Guide Card */}
-                <div className="setup-guide-card">
-                  <div className="setup-guide-header">
-                    <h4>How to get your free Google Cloud API key in 1 minute</h4>
-                    <p>Google offers every Google account 10,000 free requests per day (~100 complete album queries) with zero cost or billing required.</p>
-                  </div>
-                  <ol className="setup-steps-list">
-                    <li>
-                      <span>Open the 1-click Google Cloud shortcut:</span>
-                      <a
-                        href="https://console.cloud.google.com/flows/enableapi?apiid=youtube.googleapis.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="setup-shortcut-link"
-                      >
-                        <span>Open Google Cloud Console</span>
-                        <ExternalLink size={13} />
-                      </a>
-                    </li>
-                    <li>
-                      <span>Click <strong>&quot;Enable&quot;</strong>, then navigate to <strong>Credentials &rarr; Create Credentials &rarr; API Key</strong>.</span>
-                    </li>
-                    <li>
-                      <span>Copy your generated key (starts with <code>AIzaSy</code>) and paste it into the field above.</span>
-                    </li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ─── TAB 3: Security & Login ─── */}
+          {/* ─── TAB 2: Security & Login ─── */}
           {activeTab === 'security' && (
             <div className="settings-stack-panes">
               {/* Change Password Card */}
@@ -1240,3 +877,5 @@ export const SettingsPage = () => {
     </div>
   );
 };
+
+

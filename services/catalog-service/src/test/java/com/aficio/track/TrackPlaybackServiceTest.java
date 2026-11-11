@@ -50,6 +50,7 @@ public class TrackPlaybackServiceTest {
                 musicBrainzClient,
                 objectMapper
         );
+        trackPlaybackService.setConfiguredOwnerEmails("dev@aficio.com,owner@aficio.com");
     }
 
     @Test
@@ -150,34 +151,16 @@ public class TrackPlaybackServiceTest {
     }
 
     @Test
-    void shouldEnforceFourAlbumLimitPerClient() {
-        String client = "user-test-client";
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "albumSyncLimit", 4);
-
-        for (long albumId = 1; albumId <= 4; albumId++) {
-            assertThat(trackPlaybackService.canSyncAlbumViaYouTube(client, albumId)).isTrue();
-            trackPlaybackService.recordAlbumSynced(client, albumId);
-        }
-
-        assertThat(trackPlaybackService.getSyncedAlbumCount(client)).isEqualTo(4);
+    void shouldNeverAllowSyncingViaYouTubeDataApi() {
+        String client = "user:someuser:test@gmail.com";
+        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(client, 1L)).isFalse();
+        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(client, 1L, true)).isFalse();
         assertThat(trackPlaybackService.getRemainingAlbumQuota(client)).isEqualTo(0);
-
-        // A 5th unseen album should be blocked
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(client, 5L)).isFalse();
-
-        // But already-synced albums can still be accessed
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(client, 1L)).isTrue();
     }
 
     @Test
-    void shouldReturnLimitReachedWhenAlbumLimitHit() {
-        String client = "quota-test-user";
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "albumSyncLimit", 2);
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "youtubeApiKey", "test-api-key");
-
-        // Pre-fill 2 synced albums
-        trackPlaybackService.recordAlbumSynced(client, 101L);
-        trackPlaybackService.recordAlbumSynced(client, 102L);
+    void shouldReturnUnavailableWhenTrackHasNoPlaybackSource() {
+        String client = "user:quota-test:test@gmail.com";
 
         Artist artist = new Artist("Radiohead", "artist-mbid");
         Album album = new Album("OK Computer", "release-mbid", artist);
@@ -191,97 +174,19 @@ public class TrackPlaybackServiceTest {
         TrackPlaybackResponse response = trackPlaybackService.getPlayback(3L, client);
 
         assertThat(response).isNotNull();
-        assertThat(response.source()).isEqualTo("limit_reached");
+        assertThat(response.source()).isEqualTo("unavailable");
         assertThat(response.youtubeVideoId()).isNull();
     }
 
     @Test
-    void shouldExemptOwnerAccountFromAlbumLimit() {
-        String ownerClient = "user:Shivesh:sharmashivesh29@gmail.com";
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "albumSyncLimit", 2);
-
-        // Pre-fill 5 synced albums for owner
-        for (long i = 1; i <= 5; i++) {
-            trackPlaybackService.recordAlbumSynced(ownerClient, i);
-        }
-
-        // Owner should always be allowed
-        assertThat(trackPlaybackService.isOwnerAccount(ownerClient)).isTrue();
-        assertThat(trackPlaybackService.isOwnerAccount("user:sharmashivesh29")).isTrue();
-        assertThat(trackPlaybackService.isOwnerAccount("user:Shivesh")).isTrue();
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(ownerClient, 999L)).isTrue();
-        assertThat(trackPlaybackService.getRemainingAlbumQuota(ownerClient)).isEqualTo(Integer.MAX_VALUE);
-
-        // Standard user should be blocked
-        String standardUser = "user:SSS:lesserblack@gmail.com";
-        for (long i = 1; i <= 2; i++) {
-            trackPlaybackService.recordAlbumSynced(standardUser, i);
-        }
-        assertThat(trackPlaybackService.isOwnerAccount(standardUser)).isFalse();
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(standardUser, 999L)).isFalse();
-    }
-
-    @Test
-    void shouldBypassAlbumLimitWhenCustomApiKeyIsProvided() {
-        String standardUser = "user:SSS:lesserblack@gmail.com";
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "albumSyncLimit", 2);
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "youtubeApiKey", "system-key");
-
-        // Pre-fill 2 synced albums
-        trackPlaybackService.recordAlbumSynced(standardUser, 201L);
-        trackPlaybackService.recordAlbumSynced(standardUser, 202L);
-
-        // Standard user has reached limit for system key
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(standardUser, 203L)).isFalse();
-
-        Artist artist = new Artist("Radiohead", "artist-mbid");
-        Album album = new Album("The Bends", "release-mbid", artist);
-        org.springframework.test.util.ReflectionTestUtils.setField(album, "id", 203L);
-        Track track = new Track("rec-mbid-4", "Planet Telex", 1, 259000, album);
-        org.springframework.test.util.ReflectionTestUtils.setField(track, "id", 4L);
-
-        when(trackRepository.findById(4L)).thenReturn(Optional.of(track));
-        when(musicBrainzClient.getRecordingDetails("rec-mbid-4")).thenReturn(null);
-
-        // Without custom key -> limit_reached
-        TrackPlaybackResponse resWithout = trackPlaybackService.getPlayback(4L, standardUser, null);
-        assertThat(resWithout.source()).isEqualTo("limit_reached");
-        assertThat(resWithout.newlyDiscovered()).isFalse();
-
-        // Replaying already synced album should always be allowed
-        assertThat(trackPlaybackService.canSyncAlbumViaYouTube(standardUser, 201L)).isTrue();
-    }
-
-    @Test
-    void shouldReturnAccurateUserQuotaResponse() {
+    void shouldReturnDisabledUserQuotaResponse() {
         String standardUser = "user:kirk:lesserblack12@gmail.com";
-        org.springframework.test.util.ReflectionTestUtils.setField(trackPlaybackService, "albumSyncLimit", 4);
-
-        trackPlaybackService.recordAlbumSynced(standardUser, 101L);
-        trackPlaybackService.recordAlbumSynced(standardUser, 102L);
 
         com.aficio.dto.track.UserQuotaResponse quota = trackPlaybackService.getUserQuota(standardUser, null);
-        assertThat(quota.isOwner()).isFalse();
-        assertThat(quota.dailyLimit()).isEqualTo(4);
-        assertThat(quota.usedToday()).isEqualTo(2);
-        assertThat(quota.remaining()).isEqualTo(2);
+        assertThat(quota.dailyLimit()).isEqualTo(0);
+        assertThat(quota.usedToday()).isEqualTo(0);
+        assertThat(quota.remaining()).isEqualTo(0);
         assertThat(quota.isExhausted()).isFalse();
-        assertThat(quota.unlimited()).isFalse();
-
-        // Personal API key quota
-        com.aficio.dto.track.UserQuotaResponse personalKeyQuota = trackPlaybackService.getUserQuota(standardUser, "AIzaSyTestKey");
-        assertThat(personalKeyQuota.isOwner()).isFalse();
-        assertThat(personalKeyQuota.hasCustomKey()).isTrue();
-        assertThat(personalKeyQuota.dailyLimit()).isEqualTo(99);
-        assertThat(personalKeyQuota.usedToday()).isEqualTo(2);
-        assertThat(personalKeyQuota.remaining()).isEqualTo(97);
-        assertThat(personalKeyQuota.isExhausted()).isFalse();
-        assertThat(personalKeyQuota.unlimited()).isFalse();
-
-        // Owner quota
-        com.aficio.dto.track.UserQuotaResponse ownerQuota = trackPlaybackService.getUserQuota("user:shivesh:sharmashivesh29@gmail.com", null);
-        assertThat(ownerQuota.isOwner()).isTrue();
-        assertThat(ownerQuota.unlimited()).isTrue();
     }
 
     @Test
@@ -428,6 +333,39 @@ public class TrackPlaybackServiceTest {
                 "Sabh Te Laggu",
                 artist, album
         )).isTrue();
+    }
+
+    @Test
+    void shouldNotFallbackToStudioTracksForLiveOrUnpluggedAlbum() {
+        org.springframework.jdbc.core.JdbcTemplate mockJdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        org.springframework.beans.factory.ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbcProvider = mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(jdbcProvider.getIfAvailable()).thenReturn(mockJdbc);
+
+        TrackPlaybackService serviceWithJdbc = new TrackPlaybackService(
+                trackRepository,
+                albumRepository,
+                musicBrainzClient,
+                objectMapper,
+                null,
+                null,
+                jdbcProvider
+        );
+
+        Artist artist = new Artist("Nirvana", "art-nirv");
+        Album album = new Album("MTV Unplugged in New York", "rel-unplugged", artist);
+        Track track = new Track(null, "About a Girl", 1, 218000, album);
+
+        when(trackRepository.findById(134L)).thenReturn(Optional.of(track));
+        when(trackRepository.findByAlbumIdOrderByPosition(any())).thenReturn(List.of(track));
+
+        // When exact album match is empty in catalog, live/unplugged releases must NOT fall back to studio Bleach track
+        when(mockJdbc.queryForList(anyString(), any(), any(), any())).thenReturn(java.util.Collections.emptyList());
+
+        TrackPlaybackResponse response = serviceWithJdbc.getPlayback(134L);
+
+        // Should return unavailable rather than playing the studio version
+        assertThat(response.youtubeVideoId()).isNull();
+        verify(mockJdbc, never()).query(contains("LIMIT 1"), any(org.springframework.jdbc.core.RowMapper.class), any(), any(), any(), any());
     }
 }
 

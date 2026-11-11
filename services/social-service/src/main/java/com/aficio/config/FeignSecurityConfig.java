@@ -12,6 +12,7 @@ public class FeignSecurityConfig {
     @Bean
     RequestInterceptor bearerTokenForwarder() {
         return template -> {
+            template.header("X-Internal-Service", "social-service");
             ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
             if (attributes == null) return;
             HttpServletRequest request = attributes.getRequest();

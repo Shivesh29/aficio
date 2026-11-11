@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { AuthModal } from './components/AuthModal';
 import { MiniPlayer } from './components/MiniPlayer';
+import { GuestUpgradeModal } from './components/GuestUpgradeModal';
 
 import { CatalogPage } from './pages/CatalogPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
@@ -45,6 +46,7 @@ function App() {
             </main>
             <Footer />
             <AuthModal />
+            <GuestUpgradeModal />
             <MiniPlayer />
           </div>
         </PlayerProvider>

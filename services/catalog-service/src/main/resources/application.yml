@@ -27,13 +27,11 @@ eureka:
     fetch-registry: false
 
 aficio:
+  owner-emails: ${AFICIO_OWNER_EMAILS:}
   redis:
     enabled: ${AFICIO_REDIS_ENABLED:true}
   musicbrainz:
     user-agent: AficioMusic/1.0.0 (https://github.com/aficio/aficio)
-  youtube:
-    api-key: ${YOUTUBE_API_KEY:}
-    album-sync-limit: ${AFICIO_YOUTUBE_ALBUM_SYNC_LIMIT:4}
   jwt:
     secret: ${JWT_SECRET:change-me-in-production-to-a-long-random-string}
   cors:

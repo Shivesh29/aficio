@@ -9,6 +9,7 @@ export interface AuthUser {
   avatarUrl?: string;
   isPrivate?: boolean;
   twoFactorEnabled?: boolean;
+  listenerCode?: string;
 }
 
 export interface AuthContextType {

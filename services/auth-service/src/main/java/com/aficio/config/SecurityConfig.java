@@ -85,7 +85,7 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers("/users/settings", "/users/settings/**", "/users/account", "/users/api-key", "/users/api-key/**")
                         .authenticated()
-                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/users/*", "/users/id/*", "/users/*/privacy")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/users/*", "/users/search", "/users/id/*", "/users/*/privacy")
                         .permitAll()
                         .anyRequest()
                         .authenticated()

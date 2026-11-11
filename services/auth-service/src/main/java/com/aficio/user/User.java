@@ -51,7 +51,7 @@ public class User {
     private String avatarUrl;
 
     @jakarta.persistence.Column(name = "is_private")
-    private boolean isPrivate = false;
+    private boolean isPrivate = true;
 
     @jakarta.persistence.Column(name = "encrypted_youtube_api_key", columnDefinition = "TEXT")
     private String encryptedYoutubeApiKey;
@@ -65,6 +65,9 @@ public class User {
     @jakarta.persistence.Column(name = "google_id", length = 255)
     private String googleId;
 
+    @jakarta.persistence.Column(name = "listener_code", length = 32, unique = true)
+    private String listenerCode;
+
     protected User() {
     }
 
@@ -72,6 +75,28 @@ public class User {
         this.username = username;
         this.email = email;
         this.passwordHash = passwordHash;
+        this.listenerCode = generateListenerCode();
+    }
+
+    @jakarta.persistence.PrePersist
+    @jakarta.persistence.PostLoad
+    public void ensureListenerCode() {
+        if (this.listenerCode == null || this.listenerCode.isBlank()) {
+            this.listenerCode = generateListenerCode();
+        }
+    }
+
+    public static String generateListenerCode() {
+        final String alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder("AF-");
+        for (int i = 0; i < 8; i++) {
+            if (i == 4) {
+                sb.append('-');
+            }
+            sb.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return sb.toString();
     }
 
     public Long getId() {
@@ -218,5 +243,13 @@ public class User {
 
     public void setGoogleId(String googleId) {
         this.googleId = googleId;
+    }
+
+    public String getListenerCode() {
+        return listenerCode;
+    }
+
+    public void setListenerCode(String listenerCode) {
+        this.listenerCode = listenerCode;
     }
 }

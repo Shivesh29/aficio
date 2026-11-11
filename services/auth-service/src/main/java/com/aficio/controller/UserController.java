@@ -28,6 +28,8 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @RestController
@@ -117,7 +119,7 @@ public class UserController {
     public UserSummaryResponse findById(@PathVariable Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-        return new UserSummaryResponse(user.getId(), user.getUsername(), user.isPrivate());
+        return new UserSummaryResponse(user.getId(), user.getUsername(), user.isPrivate(), user.getListenerCode());
     }
 
     @PostMapping("/users/login")
@@ -378,17 +380,149 @@ public class UserController {
                 user.getBio(),
                 user.getAvatarUrl(),
                 user.isPrivate(),
-                user.isTwoFactorEnabled()
+                user.isTwoFactorEnabled(),
+                user.getListenerCode()
         );
     }
 
-    @GetMapping("/users/{username}")
-    public UserProfileResponse getUserProfile(@PathVariable String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "User not found"
+    @GetMapping("/users/search")
+    public List<UserProfileResponse> searchUsers(@RequestParam(required = false) String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        String cleaned = query.trim();
+        String normalized = cleaned.replaceFirst("^[@#]+", "").trim();
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+
+        // 1. Check if the query is a Listener Code (e.g. AF-DEFC-5EB2, af-defc-5eb2, DEFC-5EB2, AFDEFC5EB2)
+        String codeAttempt = normalized.replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+        if (codeAttempt.startsWith("AF") && codeAttempt.length() == 10) {
+            String formatted = "AF-" + codeAttempt.substring(2, 6) + "-" + codeAttempt.substring(6);
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(formatted);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                User u = byCode.get();
+                return List.of(new UserProfileResponse(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getDisplayName(),
+                        u.getBio(),
+                        u.getAvatarUrl(),
+                        u.isPrivate(),
+                        u.getListenerCode()
                 ));
+            }
+        } else if (codeAttempt.length() == 8) {
+            String formatted = "AF-" + codeAttempt.substring(0, 4) + "-" + codeAttempt.substring(4);
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(formatted);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                User u = byCode.get();
+                return List.of(new UserProfileResponse(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getDisplayName(),
+                        u.getBio(),
+                        u.getAvatarUrl(),
+                        u.isPrivate(),
+                        u.getListenerCode()
+                ));
+            }
+        } else {
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(cleaned);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                User u = byCode.get();
+                return List.of(new UserProfileResponse(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getDisplayName(),
+                        u.getBio(),
+                        u.getAvatarUrl(),
+                        u.isPrivate(),
+                        u.getListenerCode()
+                ));
+            }
+        }
+
+        // 2. Otherwise search PUBLIC users only (case-insensitive substring and ranking)
+        // Private accounts are NEVER discoverable by username or display name
+        return userRepository.searchPublicUsers(normalized)
+                .stream()
+                .map(u -> new UserProfileResponse(
+                        u.getId(),
+                        u.getUsername(),
+                        u.getDisplayName(),
+                        u.getBio(),
+                        u.getAvatarUrl(),
+                        u.isPrivate(),
+                        null
+                ))
+                .toList();
+    }
+
+    @GetMapping("/users/{identifier}")
+    public UserProfileResponse getUserProfile(
+            @PathVariable String identifier,
+            @RequestHeader(value = "X-Internal-Service", required = false) String internalService,
+            Authentication authentication
+    ) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+        }
+
+        String cleaned = identifier.trim();
+        String normalized = cleaned.replaceFirst("^[@#]+", "").trim();
+
+        // 1. Try resolving by Listener Code (e.g. AF-DEFC-5EB2, af-defc-5eb2, DEFC-5EB2, AFDEFC5EB2)
+        User user = null;
+        boolean accessedByCode = false;
+
+        String codeAttempt = normalized.replaceAll("[^a-zA-Z0-9]", "").toUpperCase();
+        if (codeAttempt.startsWith("AF") && codeAttempt.length() == 10) {
+            String formatted = "AF-" + codeAttempt.substring(2, 6) + "-" + codeAttempt.substring(6);
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(formatted);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                user = byCode.get();
+                accessedByCode = true;
+            }
+        } else if (codeAttempt.length() == 8) {
+            String formatted = "AF-" + codeAttempt.substring(0, 4) + "-" + codeAttempt.substring(4);
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(formatted);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                user = byCode.get();
+                accessedByCode = true;
+            }
+        } else {
+            Optional<User> byCode = userRepository.findByListenerCodeIgnoreCase(cleaned);
+            if (byCode.isPresent() && byCode.get().isEnabled()) {
+                user = byCode.get();
+                accessedByCode = true;
+            }
+        }
+
+        // 2. If not found by Listener Code, try finding by username
+        if (user == null) {
+            user = userRepository.findByUsernameIgnoreCase(normalized)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+            // If account is private and was NOT accessed via listener code:
+            if (user.isPrivate()) {
+                boolean isSelf = authentication != null && authentication.isAuthenticated()
+                        && user.getUsername().equalsIgnoreCase(authentication.getName());
+                boolean isInternal = internalService != null && !internalService.isBlank();
+
+                if (!isSelf && !isInternal) {
+                    // Do NOT confirm existence of private accounts by guessing their username!
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+                }
+            }
+        }
+
+        boolean isSelf = authentication != null && authentication.isAuthenticated()
+                && user.getUsername().equalsIgnoreCase(authentication.getName());
+
+        // Return listenerCode if accessed by code OR if viewing self
+        String listenerCode = (accessedByCode || isSelf) ? user.getListenerCode() : null;
 
         return new UserProfileResponse(
                 user.getId(),
@@ -396,13 +530,14 @@ public class UserController {
                 user.getDisplayName(),
                 user.getBio(),
                 user.getAvatarUrl(),
-                user.isPrivate()
+                user.isPrivate(),
+                listenerCode
         );
     }
 
     @GetMapping("/users/{username}/privacy")
     public PrivacyResponse getUserPrivacy(@PathVariable String username) {
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findByUsernameIgnoreCase(username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
         return new PrivacyResponse(user.isPrivate());
     }
@@ -419,7 +554,8 @@ public class UserController {
                 user.getBio(),
                 user.getAvatarUrl(),
                 user.isPrivate(),
-                user.isTwoFactorEnabled()
+                user.isTwoFactorEnabled(),
+                user.getListenerCode()
         );
     }
 
@@ -452,7 +588,8 @@ public class UserController {
                 user.getBio(),
                 user.getAvatarUrl(),
                 user.isPrivate(),
-                user.isTwoFactorEnabled()
+                user.isTwoFactorEnabled(),
+                user.getListenerCode()
         );
     }
 
@@ -535,22 +672,11 @@ public class UserController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
     }
 
-    // ──────────────── API Key Management (Local vs Cloud Informed Choice) ────────────────
+    // ──────────────── API Key Management (Disabled - Pure Local Catalog Mode) ────────────────
 
     @GetMapping("/users/api-key")
     public UserApiKeyStatusResponse getApiKeyStatus(Authentication authentication) {
-        User user = requireAuth(authentication);
-        boolean hasCloudKey = user.getEncryptedYoutubeApiKey() != null && !user.getEncryptedYoutubeApiKey().isBlank();
-        String maskedKey = null;
-        if (hasCloudKey) {
-            String decrypted = encryptionService.decrypt(user.getEncryptedYoutubeApiKey());
-            maskedKey = encryptionService.maskKey(decrypted);
-        }
-        String pref = user.getApiKeyStoragePreference();
-        if (pref == null || pref.isBlank()) {
-            pref = hasCloudKey ? "CLOUD" : "NONE";
-        }
-        return new UserApiKeyStatusResponse(hasCloudKey, pref, maskedKey);
+        return new UserApiKeyStatusResponse(false, "NONE", null);
     }
 
     @PutMapping("/users/api-key")
@@ -558,71 +684,17 @@ public class UserController {
             @Valid @RequestBody UpdateApiKeyRequest request,
             Authentication authentication
     ) {
-        User user = requireAuth(authentication);
-        String pref = request.storagePreference() != null ? request.storagePreference().trim().toUpperCase() : "NONE";
-
-        if ("CLOUD".equals(pref)) {
-            String rawKey = request.apiKey() != null ? request.apiKey().trim() : "";
-            if (rawKey.isEmpty()) {
-                user.setEncryptedYoutubeApiKey(null);
-                user.setApiKeyStoragePreference("NONE");
-                evictUserKeyCache(user.getUsername());
-            } else {
-                if (!rawKey.startsWith("AIzaSy")) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Google Cloud API keys must begin with 'AIzaSy'");
-                }
-                String encrypted = encryptionService.encrypt(rawKey);
-                user.setEncryptedYoutubeApiKey(encrypted);
-                user.setApiKeyStoragePreference("CLOUD");
-                cacheUserKey(user.getUsername(), rawKey);
-            }
-        } else if ("LOCAL".equals(pref)) {
-            // User explicitly chose local storage: clear cloud-stored DB key and cache
-            user.setEncryptedYoutubeApiKey(null);
-            user.setApiKeyStoragePreference("LOCAL");
-            evictUserKeyCache(user.getUsername());
-        } else {
-            user.setEncryptedYoutubeApiKey(null);
-            user.setApiKeyStoragePreference("NONE");
-            evictUserKeyCache(user.getUsername());
-        }
-
-        userRepository.save(user);
-
-        boolean hasCloudKey = user.getEncryptedYoutubeApiKey() != null && !user.getEncryptedYoutubeApiKey().isBlank();
-        String masked = null;
-        if (hasCloudKey) {
-            String dec = encryptionService.decrypt(user.getEncryptedYoutubeApiKey());
-            masked = encryptionService.maskKey(dec);
-        }
-        return new UserApiKeyStatusResponse(hasCloudKey, user.getApiKeyStoragePreference(), masked);
+        return new UserApiKeyStatusResponse(false, "NONE", null);
     }
 
     @DeleteMapping("/users/api-key")
     public UserApiKeyStatusResponse deleteApiKey(Authentication authentication) {
-        User user = requireAuth(authentication);
-        user.setEncryptedYoutubeApiKey(null);
-        user.setApiKeyStoragePreference("NONE");
-        evictUserKeyCache(user.getUsername());
-        userRepository.save(user);
         return new UserApiKeyStatusResponse(false, "NONE", null);
     }
 
     @GetMapping("/users/internal/{username}/youtube-api-key")
     public InternalApiKeyResponse getInternalApiKey(@PathVariable String username) {
-        if (username == null || username.isBlank()) {
-            return new InternalApiKeyResponse(username, null);
-        }
-        return userRepository.findByUsername(username)
-                .map(user -> {
-                    String enc = user.getEncryptedYoutubeApiKey();
-                    if (enc != null && !enc.isBlank()) {
-                        String dec = encryptionService.decrypt(enc);
-                        return new InternalApiKeyResponse(username, dec);
-                    }
-                    return new InternalApiKeyResponse(username, null);
-                })
-                .orElse(new InternalApiKeyResponse(username, null));
+        return new InternalApiKeyResponse(username, null);
     }
 
     private void cacheUserKey(String username, String rawKey) {
@@ -705,7 +777,8 @@ public class UserController {
             String displayName,
             String bio,
             String avatarUrl,
-            boolean isPrivate
+            boolean isPrivate,
+            String listenerCode
     ) {
     }
 
@@ -717,7 +790,8 @@ public class UserController {
             String bio,
             String avatarUrl,
             boolean isPrivate,
-            boolean twoFactorEnabled
+            boolean twoFactorEnabled,
+            String listenerCode
     ) {
     }
 
@@ -728,7 +802,8 @@ public class UserController {
             String bio,
             String avatarUrl,
             boolean isPrivate,
-            boolean twoFactorEnabled
+            boolean twoFactorEnabled,
+            String listenerCode
     ) {
     }
 

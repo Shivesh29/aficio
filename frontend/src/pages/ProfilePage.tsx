@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { api, isListPublic, type UserProfile, type Review, type MusicList, type MusicListItem, type UserQuotaResponse } from '../api/client';
+import { api, isListPublic, type UserProfile, type Review, type MusicList, type MusicListItem } from '../api/client';
 import { useAuth } from '../context/useAuth';
 import { parseUtcDate } from '../utils/date';
 import {
   Star,
   UserPlus,
   UserCheck,
+  Users,
+  Search,
+  ArrowRight,
   Send,
   Loader2,
   Disc3,
@@ -19,7 +22,27 @@ import {
   Clock,
   Check,
   Settings,
+  Share2,
+  Key,
+  Copy,
 } from 'lucide-react';
+
+const getAvatarGradient = (name: string) => {
+  const gradients = [
+    'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
+    'linear-gradient(135deg, #ec4899 0%, #be185d 100%)',
+    'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+    'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+    'linear-gradient(135deg, #10b981 0%, #047857 100%)',
+    'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
+    'linear-gradient(135deg, #06b6d4 0%, #0e7490 100%)',
+  ];
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length];
+};
 
 export const ProfilePage = () => {
   const { username } = useParams<{ username: string }>();
@@ -36,13 +59,15 @@ export const ProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [followLoading, setFollowLoading] = useState(false);
   const [error, setError] = useState('');
-  const [quota, setQuota] = useState<UserQuotaResponse | null>(null);
 
   // Follow list modal state
   const [socialModalType, setSocialModalType] = useState<'followers' | 'following' | null>(null);
   const [socialUsers, setSocialUsers] = useState<any[]>([]);
   const [loadingSocialUsers, setLoadingSocialUsers] = useState(false);
   const [socialModalError, setSocialModalError] = useState('');
+  const [socialSearchQuery, setSocialSearchQuery] = useState('');
+  const [unfollowingUsername, setUnfollowingUsername] = useState<string | null>(null);
+  const socialBackdropMouseDownRef = useRef(false);
 
   // 2FA state
   const [is2faModalOpen, setIs2faModalOpen] = useState(false);
@@ -50,8 +75,64 @@ export const ProfilePage = () => {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [is2faSubmitting, setIs2faSubmitting] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
 
-  const isSelf = currentUser && username && currentUser.username.toLowerCase() === username.toLowerCase();
+  const handleShareProfile = () => {
+    const isTargetPrivate = profile ? profile.isPrivate : Boolean(currentUser?.isPrivate);
+    const code = profile?.listenerCode || currentUser?.listenerCode;
+    const shareKey = isTargetPrivate && code ? code : (profile?.username || currentUser?.username);
+    if (!shareKey) return;
+    const url = `${window.location.origin}/u/${shareKey}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2500);
+      }).catch(() => {
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2500);
+      });
+    } else {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
+
+  const handleCopyListenerCode = (code: string) => {
+    if (!code) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(() => {
+        setCopiedCode(true);
+        setTimeout(() => setCopiedCode(false), 2500);
+      }).catch(() => {
+        setCopiedCode(true);
+        setTimeout(() => setCopiedCode(false), 2500);
+      });
+    } else {
+      const input = document.createElement('input');
+      input.value = code;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2500);
+    }
+  };
+
+  const isSelf = Boolean(
+    currentUser && (
+      (profile && currentUser.username.toLowerCase() === profile.username.toLowerCase()) ||
+      (username && currentUser.username.toLowerCase() === username.toLowerCase()) ||
+      (username && currentUser.listenerCode && currentUser.listenerCode.toLowerCase() === username.toLowerCase())
+    )
+  );
 
   useEffect(() => {
     async function loadUserProfile() {
@@ -60,14 +141,22 @@ export const ProfilePage = () => {
         setLoading(true);
         setError('');
         const prof = await api.social.getUserProfile(username);
-        setProfile(prof);
 
-        // Fetch user reviews
-        const userRevs = await api.reviews.getUserReviews(prof.id).catch(() => []);
+        // Fetch user reviews, collections, followers & following concurrently using the resolved username
+        const [userRevs, userLists, followers, following] = await Promise.all([
+          api.reviews.getUserReviews(prof.id).catch(() => []),
+          api.lists.getUserLists(prof.username).catch(() => []),
+          api.social.getFollowers(prof.username).catch(() => []),
+          api.social.getFollowing(prof.username).catch(() => []),
+        ]);
+        setProfile({
+          ...prof,
+          followersCount: typeof prof.followersCount === 'number' ? prof.followersCount : followers.length,
+          followingCount: typeof prof.followingCount === 'number' ? prof.followingCount : following.length,
+          reviewsCount: typeof prof.reviewsCount === 'number' ? prof.reviewsCount : userRevs.length,
+          listsCount: typeof prof.listsCount === 'number' ? prof.listsCount : userLists.length,
+        });
         setReviews(userRevs);
-
-        // Fetch user collections
-        const userLists = await api.lists.getUserLists(username).catch(() => []);
         setCollections(userLists);
 
         // Fetch preview albums for each list (first 4 items for collage)
@@ -87,8 +176,9 @@ export const ProfilePage = () => {
         setListPreviewMap(previews);
 
         // Check if currently following and follow status
-        if (isAuthenticated && !isSelf) {
-          const statusRes = await api.social.getFollowStatus(username).catch(() => ({
+        const isProfileSelf = currentUser && currentUser.username.toLowerCase() === prof.username.toLowerCase();
+        if (isAuthenticated && !isProfileSelf) {
+          const statusRes = await api.social.getFollowStatus(prof.username).catch(() => ({
             status: 'NONE' as const,
             following: false,
             pending: false,
@@ -96,9 +186,8 @@ export const ProfilePage = () => {
           setFollowStatus(statusRes.status);
         }
 
-        // If viewing self, load quota and any pending follow requests
-        if (isAuthenticated && isSelf) {
-          api.catalog.getUserQuota().then((q) => setQuota(q)).catch(() => {});
+        // If viewing self, load any pending follow requests
+        if (isAuthenticated && isProfileSelf) {
           const requests = await api.social.getPendingFollowRequests().catch(() => []);
           setPendingRequests(requests);
         }
@@ -109,25 +198,26 @@ export const ProfilePage = () => {
       }
     }
     void loadUserProfile();
-  }, [username, isAuthenticated, isSelf]);
+  }, [username, currentUser, isAuthenticated]);
 
   const handleToggleFollow = async () => {
     if (!isAuthenticated) {
       openAuthModal('login');
       return;
     }
-    if (!username) return;
+    const targetUsername = profile?.username || username;
+    if (!targetUsername) return;
 
     setFollowLoading(true);
     try {
       if (followStatus === 'FOLLOWING' || followStatus === 'PENDING') {
-        await api.social.unfollow(username);
+        await api.social.unfollow(targetUsername);
         if (followStatus === 'FOLLOWING') {
           setProfile((prev) => (prev ? { ...prev, followersCount: Math.max(0, prev.followersCount - 1) } : null));
         }
         setFollowStatus('NONE');
       } else {
-        const res = await api.social.follow(username);
+        const res = await api.social.follow(targetUsername);
         if (res.status === 'PENDING' || profile?.isPrivate) {
           setFollowStatus('PENDING');
         } else {
@@ -161,17 +251,29 @@ export const ProfilePage = () => {
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && socialModalType) {
+        setSocialModalType(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [socialModalType]);
+
   const handleOpenSocialModal = async (type: 'followers' | 'following') => {
-    if (!username) return;
+    const targetUsername = profile?.username || username;
+    if (!targetUsername) return;
     setSocialModalType(type);
+    setSocialSearchQuery('');
     setLoadingSocialUsers(true);
     setSocialModalError('');
     try {
       if (type === 'followers') {
-        const list = await api.social.getFollowers(username);
+        const list = await api.social.getFollowers(targetUsername);
         setSocialUsers(list.map((f) => f.follower).filter(Boolean));
       } else {
-        const list = await api.social.getFollowing(username);
+        const list = await api.social.getFollowing(targetUsername);
         setSocialUsers(list.map((f) => f.following).filter(Boolean));
       }
     } catch (err) {
@@ -179,6 +281,23 @@ export const ProfilePage = () => {
       setSocialUsers([]);
     } finally {
       setLoadingSocialUsers(false);
+    }
+  };
+
+  const handleUnfollowFromList = async (targetUsername: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!targetUsername || unfollowingUsername) return;
+
+    setUnfollowingUsername(targetUsername);
+    try {
+      await api.social.unfollow(targetUsername);
+      setSocialUsers((prev) => prev.filter((u) => u.username !== targetUsername));
+      setProfile((prev) => (prev ? { ...prev, followingCount: Math.max(0, prev.followingCount - 1) } : null));
+    } catch {
+      alert(`Could not unfollow @${targetUsername}`);
+    } finally {
+      setUnfollowingUsername(null);
     }
   };
 
@@ -250,6 +369,10 @@ export const ProfilePage = () => {
 
   const isPrivateLocked = Boolean(profile.isPrivate) && !isSelf && followStatus !== 'FOLLOWING';
 
+  const filteredSocialUsers = socialUsers.filter((u) =>
+    (u.username || '').toLowerCase().includes(socialSearchQuery.toLowerCase().trim())
+  );
+
   return (
     <div className="profile-page">
       {/* Profile Header */}
@@ -272,6 +395,22 @@ export const ProfilePage = () => {
                 <span>Private</span>
               </span>
             )}
+            {isSelf && (currentUser?.listenerCode || profile.listenerCode) && (
+              <button
+                type="button"
+                className="profile-listener-quick-pill"
+                onClick={handleShareProfile}
+                title="Click to copy your unique private profile link"
+              >
+                <Key size={12} style={{ color: 'var(--accent-gold)' }} />
+                <span>{profile.listenerCode || currentUser?.listenerCode}</span>
+                {copiedLink ? (
+                  <span style={{ color: '#10b981', fontWeight: 600 }}>Link Copied!</span>
+                ) : (
+                  <Copy size={11} style={{ opacity: 0.7 }} />
+                )}
+              </button>
+            )}
           </div>
 
           {profile.bio && (
@@ -282,15 +421,21 @@ export const ProfilePage = () => {
 
           <div className="profile-stats-row">
             <div
-              className="profile-stat-box cursor-pointer"
+              className={`profile-stat-box cursor-pointer ${activeTab === 'reviews' ? 'stat-active' : ''}`}
               onClick={() => setActiveTab('reviews')}
+              role="button"
+              tabIndex={0}
+              title="View reviews tab"
             >
               <strong>{profile.reviewsCount}</strong>
               <span>Reviews</span>
             </div>
             <div
-              className="profile-stat-box cursor-pointer"
+              className={`profile-stat-box cursor-pointer ${activeTab === 'collections' ? 'stat-active' : ''}`}
               onClick={() => setActiveTab('collections')}
+              role="button"
+              tabIndex={0}
+              title="View collections tab"
             >
               <strong>{collections.length || profile.listsCount}</strong>
               <span>Collections</span>
@@ -298,6 +443,9 @@ export const ProfilePage = () => {
             <div
               className="profile-stat-box cursor-pointer"
               onClick={() => void handleOpenSocialModal('followers')}
+              role="button"
+              tabIndex={0}
+              title="View followers"
             >
               <strong>{profile.followersCount}</strong>
               <span>Followers</span>
@@ -305,59 +453,54 @@ export const ProfilePage = () => {
             <div
               className="profile-stat-box cursor-pointer"
               onClick={() => void handleOpenSocialModal('following')}
+              role="button"
+              tabIndex={0}
+              title="View following"
             >
               <strong>{profile.followingCount}</strong>
               <span>Following</span>
             </div>
           </div>
 
-          {isSelf && quota && (
-            <div className="profile-quota-card">
-              <div className="profile-quota-top">
-                <div className="quota-title-flex">
-                  <span className="quota-badge-label">
-                    {quota.unlimited
-                      ? (quota.isOwner ? '⚡ Dev / Owner Tier' : '🔑 Custom Key Tier')
-                      : quota.hasCustomKey
-                      ? '🔑 Personal Key Tier (10k Quota)'
-                      : 'Daily Discovery Limit'}
+          {isSelf && (currentUser?.listenerCode || profile.listenerCode) && (
+            <div className="profile-listener-code-card">
+              <div className="listener-code-header-flex">
+                <div className="listener-code-tag-group">
+                  <Key size={14} style={{ color: 'var(--accent-gold)' }} />
+                  <strong>Your Unique Listener Code</strong>
+                  <span className={`listener-code-badge ${profile.isPrivate ? 'is-private' : 'is-public'}`}>
+                    {profile.isPrivate ? 'Private Account' : 'Public Account'}
                   </span>
-                  {quota.isExhausted && (
-                    <span className="quota-exhausted-pill">Limit Reached</span>
-                  )}
                 </div>
-                <span className="quota-fraction-text">
-                  {quota.unlimited ? 'Unlimited' : `${quota.usedToday} / ${quota.dailyLimit} Used Today`}
-                </span>
-              </div>
-
-              {!quota.unlimited && (
-                <div className="profile-quota-bar-track">
-                  <div
-                    className={`profile-quota-bar-fill ${quota.isExhausted ? 'is-exhausted' : quota.usedToday >= (quota.dailyLimit * 0.8) ? 'is-warning' : ''}`}
-                    style={{ width: `${Math.min(100, (quota.usedToday / quota.dailyLimit) * 100)}%` }}
-                  />
+                <div className="listener-code-btns">
+                  <button
+                    type="button"
+                    className="listener-code-copy-btn"
+                    onClick={() => handleCopyListenerCode(currentUser?.listenerCode || profile.listenerCode || '')}
+                    title="Copy unique Listener Code"
+                  >
+                    {copiedCode ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
+                    <span>{copiedCode ? 'Code Copied' : 'Copy Code'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="listener-code-copy-btn"
+                    onClick={handleShareProfile}
+                    title="Copy direct profile link"
+                  >
+                    {copiedLink ? <Check size={13} style={{ color: '#10b981' }} /> : <Share2 size={13} />}
+                    <span>{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
+                  </button>
                 </div>
-              )}
-
-              <div className="profile-quota-footer">
-                <p>
-                  {quota.unlimited
-                    ? (quota.isOwner ? 'Unlimited new album discoveries enabled for dev account.' : 'Your personal YouTube API key is active with unlimited discoveries.')
-                    : quota.hasCustomKey
-                    ? quota.isExhausted
-                      ? "You've reached your daily personal API key discovery limit (99/99 albums). Your Google Cloud 10,000 quota resets at midnight Pacific Time. Replaying catalogued & cached albums remains completely free."
-                      : `${quota.remaining} new album ${quota.remaining === 1 ? 'discovery' : 'discoveries'} remaining today (10,000 Google Cloud quota). Replaying already catalogued albums is always free and unlimited.`
-                    : quota.isExhausted
-                    ? `You've used today's ${quota.dailyLimit} new album discoveries. Replaying catalogued & cached albums remains completely free. Resets at midnight UTC, or add a personal API key in Settings for 99 daily discoveries.`
-                    : `${quota.remaining} new album ${quota.remaining === 1 ? 'discovery' : 'discoveries'} remaining today. Replaying already catalogued albums is always free and unlimited.`}
-                </p>
-                {!quota.unlimited && (
-                  <Link to="/settings" className="quota-settings-link">
-                    Settings &rarr;
-                  </Link>
-                )}
               </div>
+              <div className="listener-code-badge-number">
+                <code>{currentUser?.listenerCode || profile.listenerCode}</code>
+              </div>
+              <p className="listener-code-description">
+                {profile.isPrivate
+                  ? '🔒 Your account is private and completely unlisted from public username searches. Friends can locate and follow your account only by searching this random Listener Code or opening your direct profile link.'
+                  : '🌐 Your account is public. Other listeners can discover your profile by username or by entering this Listener Code.'}
+              </p>
             </div>
           )}
         </div>
@@ -404,9 +547,30 @@ export const ProfilePage = () => {
                 <Send size={15} />
                 <span>Message</span>
               </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleShareProfile}
+                title="Copy direct profile link to share with friends"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+              >
+                {copiedLink ? <Check size={15} style={{ color: '#10b981' }} /> : <Share2 size={15} />}
+                <span>{copiedLink ? 'Link Copied!' : 'Share'}</span>
+              </button>
             </>
           ) : (
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleShareProfile}
+                title="Copy your direct profile link to share with friends"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                {copiedLink ? <Check size={15} style={{ color: '#10b981' }} /> : <Share2 size={15} />}
+                <span>{copiedLink ? 'Link Copied!' : 'Share Profile'}</span>
+              </button>
               <Link to="/settings" className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Settings size={15} />
                 <span>Settings</span>
@@ -460,7 +624,7 @@ export const ProfilePage = () => {
                     {req.follower?.username?.charAt(0).toUpperCase()}
                   </span>
                   <Link
-                    to={`/u/${req.follower?.username}`}
+                    to={`/u/${req.follower?.isPrivate && req.follower?.listenerCode ? req.follower?.listenerCode : req.follower?.username}`}
                     style={{ fontWeight: 600, color: 'var(--aficio-text)' }}
                   >
                     {req.follower?.username}
@@ -650,53 +814,220 @@ export const ProfilePage = () => {
 
       {/* Social Follow Modal */}
       {socialModalType && (
-        <div className="modal-backdrop" onClick={() => setSocialModalType(null)}>
-          <div className="modal-card social-users-modal" onClick={(e) => e.stopPropagation()}>
-            <button
-              className="modal-close-btn"
-              onClick={() => setSocialModalType(null)}
-              aria-label="Close modal"
-            >
-              <X size={18} />
-            </button>
+        <div
+          className="modal-backdrop social-network-backdrop"
+          onMouseDown={(e) => {
+            socialBackdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
+          onMouseUp={(e) => {
+            if (socialBackdropMouseDownRef.current && e.target === e.currentTarget) {
+              setSocialModalType(null);
+            }
+            socialBackdropMouseDownRef.current = false;
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Community Network"
+        >
+          <div className="modal-card social-network-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="social-modal-header">
+              <div className="social-modal-title-row">
+                <div className="social-modal-badge-icon">
+                  <Users size={18} />
+                </div>
+                <div>
+                  <span className="social-modal-kicker">COMMUNITY NETWORK</span>
+                  <h3 className="social-modal-title">
+                    {profile.displayName || profile.username}
+                  </h3>
+                </div>
+              </div>
 
-            <div className="review-modal-header">
-              <span className="kicker">Network</span>
-              <h3>{socialModalType === 'followers' ? 'Followers' : 'Following'}</h3>
-              <p>Listeners connected with {profile.displayName || profile.username}</p>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setSocialModalType(null)}
+                aria-label="Close modal"
+              >
+                <X size={18} />
+              </button>
             </div>
 
+            {/* Segmented Tabs for Followers / Following */}
+            <div className="social-modal-tabs">
+              <button
+                type="button"
+                className={`social-modal-tab ${socialModalType === 'followers' ? 'active' : ''}`}
+                onClick={() => void handleOpenSocialModal('followers')}
+              >
+                <Users size={15} />
+                <span>Followers</span>
+                <span className="social-modal-tab-count">{profile.followersCount}</span>
+              </button>
+              <button
+                type="button"
+                className={`social-modal-tab ${socialModalType === 'following' ? 'active' : ''}`}
+                onClick={() => void handleOpenSocialModal('following')}
+              >
+                <UserCheck size={15} />
+                <span>Following</span>
+                <span className="social-modal-tab-count">{profile.followingCount}</span>
+              </button>
+            </div>
+
+            {/* Search Filter (only when not loading, not error, and has users) */}
+            {!loadingSocialUsers && !socialModalError && socialUsers.length > 0 && (
+              <div className="social-modal-search-wrap">
+                <Search size={14} className="social-search-icon" />
+                <input
+                  type="text"
+                  className="social-modal-search-input"
+                  placeholder={socialModalType === 'followers' ? 'Filter followers by username...' : 'Filter following by username...'}
+                  value={socialSearchQuery}
+                  onChange={(e) => setSocialSearchQuery(e.target.value)}
+                />
+                {socialSearchQuery && (
+                  <button
+                    type="button"
+                    className="social-modal-search-clear"
+                    onClick={() => setSocialSearchQuery('')}
+                    aria-label="Clear filter"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* List / States */}
             <div className="social-users-scroll-list">
               {loadingSocialUsers ? (
-                <div className="loading-state-container" style={{ padding: '2rem' }}>
-                  <Loader2 size={24} className="spin-loader" />
-                  <p>Loading community...</p>
+                <div className="social-modal-state-container">
+                  <Loader2 size={26} className="spin-loader" style={{ color: 'var(--accent-gold)', marginBottom: '0.75rem' }} />
+                  <p>Loading {socialModalType === 'followers' ? 'followers' : 'following'}...</p>
                 </div>
               ) : socialModalError ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                  <Lock size={32} style={{ margin: '0 auto 0.75rem auto', color: 'var(--accent-gold)' }} />
+                <div className="social-modal-state-container">
+                  <div className="social-state-icon-badge private-badge">
+                    <Lock size={26} />
+                  </div>
+                  <h4>Private Account</h4>
                   <p>{socialModalError}</p>
                 </div>
               ) : socialUsers.length === 0 ? (
-                <p className="sidebar-empty-hint">No listeners to show.</p>
-              ) : (
-                socialUsers.map((u) => (
-                  <div key={u.id} className="social-user-row">
-                    <span className="user-avatar-sm">
-                      {u.username?.charAt(0).toUpperCase()}
-                    </span>
-                    <div className="social-user-text">
-                      <Link
-                        to={`/u/${u.username}`}
-                        onClick={() => setSocialModalType(null)}
-                      >
-                        <strong>{u.username}</strong>
-                      </Link>
-                    </div>
+                <div className="social-modal-state-container">
+                  <div className="social-state-icon-badge">
+                    {socialModalType === 'followers' ? <Users size={26} /> : <UserPlus size={26} />}
                   </div>
-                ))
+                  <h4>{socialModalType === 'followers' ? 'No followers yet' : 'Not following anyone yet'}</h4>
+                  <p>
+                    {socialModalType === 'followers'
+                      ? `When listeners follow @${profile.username}, they will appear here.`
+                      : `@${profile.username} isn't following any other listeners yet.`}
+                  </p>
+                </div>
+              ) : filteredSocialUsers.length === 0 ? (
+                <div className="social-modal-state-container">
+                  <div className="social-state-icon-badge">
+                    <Search size={24} />
+                  </div>
+                  <h4>No matching listeners</h4>
+                  <p>No listeners matching &ldquo;{socialSearchQuery}&rdquo;.</p>
+                  <button
+                    type="button"
+                    className="social-reset-filter-btn"
+                    onClick={() => setSocialSearchQuery('')}
+                  >
+                    Clear search
+                  </button>
+                </div>
+              ) : (
+                <div className="social-user-cards-grid">
+                  {filteredSocialUsers.map((u) => {
+                    const isSelfInList = currentUser?.username?.toLowerCase() === u.username?.toLowerCase();
+                    const initial = (u.username || '?').charAt(0).toUpperCase();
+                    const isUnfollowing = unfollowingUsername === u.username;
+
+                    return (
+                      <div key={u.id} className="social-user-card">
+                        <Link
+                          to={`/u/${u.isPrivate && u.listenerCode ? u.listenerCode : u.username}`}
+                          className="social-user-card-body"
+                          onClick={() => setSocialModalType(null)}
+                        >
+                          <div className="social-user-avatar-wrap">
+                            <div
+                              className="social-user-avatar-disc"
+                              style={{ background: getAvatarGradient(u.username || '') }}
+                            >
+                              <span>{initial}</span>
+                            </div>
+                          </div>
+
+                          <div className="social-user-info">
+                            <div className="social-user-title-line">
+                              <span className="social-user-handle">@{u.username}</span>
+                              {isSelfInList && (
+                                <span className="social-pill-you">You</span>
+                              )}
+                              {u.isPrivate && (
+                                <span className="social-pill-private" title="Private profile">
+                                  <Lock size={10} />
+                                  <span>Private</span>
+                                </span>
+                              )}
+                            </div>
+                            <span className="social-user-meta-sub">Aficio Listener</span>
+                          </div>
+                        </Link>
+
+                        <div className="social-user-actions-cell">
+                          {isSelf && socialModalType === 'following' && !isSelfInList ? (
+                            <button
+                              type="button"
+                              className="social-btn-unfollow"
+                              onClick={(e) => handleUnfollowFromList(u.username, e)}
+                              disabled={isUnfollowing}
+                              title={`Unfollow @${u.username}`}
+                            >
+                              {isUnfollowing ? (
+                                <Loader2 size={13} className="spin-loader" />
+                              ) : (
+                                <>
+                                  <UserCheck size={13} className="icon-following" />
+                                  <span className="label-following">Following</span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <Link
+                              to={`/u/${u.username}`}
+                              className="social-btn-view"
+                              onClick={() => setSocialModalType(null)}
+                            >
+                              <span>View</span>
+                              <ArrowRight size={13} />
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
+
+            {/* Modal Footer */}
+            {!loadingSocialUsers && !socialModalError && socialUsers.length > 0 && (
+              <div className="social-modal-footer">
+                <span>
+                  {filteredSocialUsers.length} {filteredSocialUsers.length === 1 ? 'listener' : 'listeners'}
+                  {socialSearchQuery && ` (filtered from ${socialUsers.length})`}
+                </span>
+                <span>Aficio Community</span>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -43,10 +43,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import com.aficio.catalog.CatalogNormalizationUtils;
 import com.aficio.catalog.CatalogService;
+import com.aficio.security.VerifiedIdentity;
 
 @Service
 public class TrackPlaybackService {
@@ -73,11 +76,6 @@ public class TrackPlaybackService {
     private final com.aficio.history.UserAlbumHistoryRepository userAlbumHistoryRepository;
     private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
-    @Value("${aficio.youtube.api-key:}")
-    private String youtubeApiKey;
-
-    @Value("${aficio.youtube.album-sync-limit:4}")
-    private int albumSyncLimit;
 
     @Value("${aficio.playback.enable-musicbrainz-ids:false}")
     private boolean enableMusicBrainzIds = false;
@@ -101,14 +99,38 @@ public class TrackPlaybackService {
     @Value("${aficio.auth-service.url:http://auth-service:8081}")
     private String authServiceUrl;
 
+    @Value("${aficio.owner-emails:}")
+    private String configuredOwnerEmails = "";
+
+    public void setConfiguredOwnerEmails(String emails) {
+        this.configuredOwnerEmails = emails != null ? emails : "";
+    }
+
     // Distinct album IDs synced via YouTube API per client identifier (in-memory fallback)
     private final ConcurrentHashMap<String, Set<Long>> clientSyncedAlbums = new ConcurrentHashMap<>();
+
+    // Single-flight deduplication to prevent parallel request stampedes on YouTube API for the same album
+    private final ConcurrentHashMap<Long, CompletableFuture<Boolean>> inFlightAlbumSyncs = new ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.aficio.artist.ArtistRepository artistRepository;
 
     public void setArtistRepository(com.aficio.artist.ArtistRepository artistRepository) {
         this.artistRepository = artistRepository;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private SystemQuotaAuditTracker systemQuotaAuditTracker;
+
+    public void setSystemQuotaAuditTracker(SystemQuotaAuditTracker tracker) {
+        this.systemQuotaAuditTracker = tracker;
+    }
+
+    public SystemQuotaAuditTracker getSystemQuotaAuditTracker() {
+        if (this.systemQuotaAuditTracker == null) {
+            this.systemQuotaAuditTracker = new SystemQuotaAuditTracker(null, objectMapper);
+        }
+        return this.systemQuotaAuditTracker;
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -178,67 +200,39 @@ public class TrackPlaybackService {
         return colon > 0 ? raw.substring(0, colon) : raw;
     }
 
+    public String extractEmail(String clientId) {
+        if (clientId == null || !clientId.startsWith("user:")) return null;
+        String raw = clientId.substring(5);
+        int colon = raw.indexOf(':');
+        return colon > 0 ? raw.substring(colon + 1) : null;
+    }
+
+    public VerifiedIdentity parseIdentityFromClientId(String clientId) {
+        boolean isOwner = isOwnerAccount(clientId);
+        if (clientId != null && clientId.startsWith("user:")) {
+            return VerifiedIdentity.authenticated(extractUsername(clientId), extractEmail(clientId), isOwner);
+        }
+        String ip = (clientId != null && clientId.startsWith("ip:")) ? clientId.substring(3) : clientId;
+        return VerifiedIdentity.anonymous(ip);
+    }
+
     public String resolveUserCloudApiKey(String clientId) {
-        String username = extractUsername(clientId);
-        if (username == null || username.isBlank()) return null;
-
-        // 1. Check Redis cache first (instant hit)
-        if (stringRedisTemplate != null) {
-            try {
-                String cached = stringRedisTemplate.opsForValue().get("aficio:user_key:" + username);
-                if (cached != null && !cached.isBlank()) {
-                    return cached.trim();
-                }
-            } catch (Exception ex) {
-                log.warn("Redis error checking cached user API key for [{}]: {}", username, ex.getMessage());
-            }
-        }
-
-        // 2. Fetch from auth-service internal endpoint
-        try {
-            String baseUrl = (authServiceUrl != null && !authServiceUrl.isBlank()) ? authServiceUrl.trim() : "http://auth-service:8081";
-            if (baseUrl.endsWith("/")) {
-                baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-            }
-            String url = baseUrl + "/users/internal/" + username + "/youtube-api-key";
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(3))
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200 && response.body() != null) {
-                JsonNode root = objectMapper.readTree(response.body());
-                if (root.has("apiKey") && !root.get("apiKey").isNull()) {
-                    String key = root.get("apiKey").asText();
-                    if (key != null && !key.isBlank()) {
-                        key = key.trim();
-                        if (stringRedisTemplate != null) {
-                            try {
-                                stringRedisTemplate.opsForValue().set("aficio:user_key:" + username, key, Duration.ofDays(7));
-                            } catch (Exception ex) {
-                                log.warn("Failed to cache resolved user API key in Redis: {}", ex.getMessage());
-                            }
-                        }
-                        return key;
-                    }
-                }
-            }
-        } catch (Exception ex) {
-            log.warn("Failed to fetch cloud API key from auth-service for user [{}]: {}", username, ex.getMessage());
-        }
-
         return null;
     }
 
     public boolean isOwnerAccount(String clientId) {
-        if (clientId == null) return false;
-        String lower = clientId.toLowerCase();
-        return lower.contains("sharmashivesh29")
-                || lower.contains("shivesh29")
-                || lower.equals("user:shivesh")
-                || lower.startsWith("user:shivesh:")
-                || lower.endsWith(":shivesh");
+        if (clientId == null || configuredOwnerEmails == null || configuredOwnerEmails.isBlank()) return false;
+        String email = extractEmail(clientId);
+        String username = extractUsername(clientId);
+        String[] parts = configuredOwnerEmails.split(",");
+        for (String part : parts) {
+            String owner = part.trim().toLowerCase();
+            if (owner.isEmpty()) continue;
+            if (email != null && email.trim().equalsIgnoreCase(owner)) return true;
+            if (username != null && username.trim().equalsIgnoreCase(owner)) return true;
+            if (clientId.toLowerCase().contains(owner)) return true;
+        }
+        return false;
     }
 
     public int getSyncedAlbumCount(String clientId) {
@@ -259,81 +253,41 @@ public class TrackPlaybackService {
     }
 
     public int getRemainingAlbumQuota(String clientId, boolean hasCustomKey) {
-        if (isOwnerAccount(clientId)) {
-            return Integer.MAX_VALUE;
-        }
-        int limit = hasCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit;
-        return Math.max(0, limit - getSyncedAlbumCount(clientId));
+        return 0;
     }
 
     public boolean canSyncAlbumViaYouTube(String clientId, Long albumId) {
-        return canSyncAlbumViaYouTube(clientId, albumId, false);
+        return false;
     }
 
     public boolean canSyncAlbumViaYouTube(String clientId, Long albumId, boolean hasCustomKey) {
-        // Owner/dev account (sharmashivesh29) has unlimited discovery using system API key
-        if (isOwnerAccount(clientId)) {
-            return true;
-        }
+        return false;
+    }
 
-        int limit = hasCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit;
-        if (limit <= 0) return true; // unlimited if <= 0
-
-        // If this album was already discovered today or previously by this client, replay is free!
-        if (albumId != null) {
-            if (stringRedisTemplate != null) {
-                try {
-                    String key = getRedisQuotaKey(clientId);
-                    Boolean isMember = stringRedisTemplate.opsForSet().isMember(key, albumId.toString());
-                    if (Boolean.TRUE.equals(isMember)) {
-                        return true;
-                    }
-                } catch (Exception ex) {
-                    log.warn("Redis error checking album membership for [{}]: {}", albumId, ex.getMessage());
-                }
-            }
-            Set<Long> synced = clientSyncedAlbums.getOrDefault(clientId, Collections.emptySet());
-            if (synced.contains(albumId)) {
-                return true;
-            }
-        }
-
-        return getSyncedAlbumCount(clientId) < limit;
+    public boolean canSyncAlbumViaYouTube(String clientId, Long albumId, boolean hasCustomKey, boolean isDev) {
+        return false;
     }
 
     public void recordAlbumSynced(String clientId, Long albumId) {
-        if (albumId == null) return;
-        if (stringRedisTemplate != null) {
-            try {
-                String key = getRedisQuotaKey(clientId);
-                stringRedisTemplate.opsForSet().add(key, albumId.toString());
-                stringRedisTemplate.expire(key, Duration.ofDays(2));
-            } catch (Exception ex) {
-                log.warn("Redis error recording album sync for [{}] [{}]: {}", clientId, albumId, ex.getMessage());
-            }
-        }
-        clientSyncedAlbums.computeIfAbsent(clientId, k -> ConcurrentHashMap.newKeySet()).add(albumId);
+        // No-op: external syncs disabled
+    }
+
+    public UserQuotaResponse getUserQuota(VerifiedIdentity identity, String customApiKey) {
+        String clientId = identity != null ? identity.toClientId(null) : "anonymous";
+        return new UserQuotaResponse(
+                clientId,
+                false,
+                false,
+                0,
+                0,
+                0,
+                false,
+                false
+        );
     }
 
     public UserQuotaResponse getUserQuota(String clientId, String customApiKey) {
-        boolean isOwner = isOwnerAccount(clientId);
-        boolean hasCustomKey = customApiKey != null && !customApiKey.isBlank();
-        int used = getSyncedAlbumCount(clientId);
-        int limit = isOwner ? -1 : (hasCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit);
-        int remaining = isOwner ? Integer.MAX_VALUE : Math.max(0, limit - used);
-        boolean unlimited = isOwner;
-        boolean isExhausted = !unlimited && remaining <= 0;
-
-        return new UserQuotaResponse(
-                clientId,
-                isOwner,
-                hasCustomKey,
-                limit,
-                used,
-                remaining,
-                isExhausted,
-                unlimited
-        );
+        return getUserQuota(parseIdentityFromClientId(clientId), customApiKey);
     }
 
     @Transactional
@@ -348,6 +302,20 @@ public class TrackPlaybackService {
 
     @Transactional
     public TrackPlaybackResponse getPlayback(Long trackId, String clientId, String customApiKey) {
+        return getPlayback(trackId, parseIdentityFromClientId(clientId), customApiKey);
+    }
+
+    @Transactional
+    public TrackPlaybackResponse getPlayback(Long trackId, VerifiedIdentity identity, String customApiKey) {
+        getSystemQuotaAuditTracker().startRequestTracking();
+        try {
+            return doGetPlayback(trackId, identity, customApiKey);
+        } finally {
+            getSystemQuotaAuditTracker().finishRequestTracking();
+        }
+    }
+
+    private TrackPlaybackResponse doGetPlayback(Long trackId, VerifiedIdentity identity, String customApiKey) {
         Track track = trackRepository.findById(trackId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Track not found with id: " + trackId));
 
@@ -357,12 +325,11 @@ public class TrackPlaybackService {
         Long albumId = (album != null) ? album.getId() : null;
         String coverArtUrl = (album != null) ? album.getCoverArtUrl() : null;
 
+        String clientId = identity != null ? identity.toClientId(null) : "anonymous";
+        boolean isDevAccount = identity != null && identity.isDevAccount();
         boolean hasCustomKey = customApiKey != null && !customApiKey.isBlank();
-        String effectiveApiKey = hasCustomKey ? customApiKey.trim() : this.youtubeApiKey;
-        int clientLimit = isOwnerAccount(clientId) ? -1 : (hasCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit);
-        int clientRemaining = getRemainingAlbumQuota(clientId, hasCustomKey);
 
-        // 1. Instant Cache: Check if already stored in database (0 quota units)
+        // 1. Instant Cache: Check if already stored in database (0 external calls)
         if (track.getYoutubeVideoId() != null && !track.getYoutubeVideoId().isBlank()) {
             recordUserAlbumHistory(clientId, album, false);
             return new TrackPlaybackResponse(
@@ -378,17 +345,20 @@ public class TrackPlaybackService {
                     null,
                     "cached",
                     false,
-                    getSyncedAlbumCount(clientId),
-                    clientLimit,
-                    clientRemaining
+                    0,
+                    0,
+                    0,
+                    0,
+                    null,
+                    null,
+                    null
             );
         }
 
         String youtubeVideoId = null;
         String source = null;
-        boolean newlyDiscovered = false;
 
-        // 2. MusicBrainz Recording Relations Check (Disabled by default to strictly isolate 12M dataset)
+        // 2. MusicBrainz Recording Relations Check (Optional)
         if (enableMusicBrainzIds && track.getMusicBrainzId() != null && !track.getMusicBrainzId().isBlank()) {
             try {
                 youtubeVideoId = resolveFromMusicBrainz(track);
@@ -403,7 +373,7 @@ public class TrackPlaybackService {
             }
         }
 
-        // 3. LAION-DISCO-12M Catalog Lookup (0 quota units)
+        // 3. Local Catalog Lookup (0 external calls - PostgreSQL youtube_catalog)
         if (youtubeVideoId == null) {
             try {
                 youtubeVideoId = resolveFromYoutubeCatalog(track, album, artistName);
@@ -415,58 +385,12 @@ public class TrackPlaybackService {
             }
         }
 
-        // 4. Album Playlist Resolution Engine: Batch resolve all album tracks via YouTube Data API
-        if (youtubeVideoId == null && album != null) {
-            try {
-                newlyDiscovered = populateAlbumPlaylistTracks(album, clientId, effectiveApiKey, hasCustomKey);
-                // Refresh local track instance after batch update
-                Track refreshedTrack = trackRepository.findById(trackId).orElse(track);
-                if (refreshedTrack.getYoutubeVideoId() != null && !refreshedTrack.getYoutubeVideoId().isBlank()) {
-                    youtubeVideoId = refreshedTrack.getYoutubeVideoId();
-                    source = hasCustomKey ? "custom_key_playlist" : "album_playlist";
-                    track = refreshedTrack;
-                }
-            } catch (Exception ex) {
-                log.warn("Album playlist resolution failed for album [{}]: {}", albumTitle, ex.getMessage());
-            }
-        }
-
-        // 4. Targeted Single-Track Fallback: If still missing, try searching specifically for this track
-        if (youtubeVideoId == null && effectiveApiKey != null && !effectiveApiKey.isBlank()) {
-            if (canSyncAlbumViaYouTube(clientId, albumId, hasCustomKey)) {
-                try {
-                    String singleVid = searchYouTubeForSingleTrack(artistName, track.getTitle(), albumTitle, effectiveApiKey);
-                    if (singleVid != null && !singleVid.isBlank()) {
-                        track.setYoutubeVideoId(singleVid);
-                        trackRepository.save(track);
-                        youtubeVideoId = singleVid;
-                        source = hasCustomKey ? "custom_key_track_search" : "track_search";
-                        recordAlbumSynced(clientId, albumId);
-                    }
-                } catch (Exception ex) {
-                    log.warn("Single-track fallback search failed for [{} - {}]: {}", artistName, track.getTitle(), ex.getMessage());
-                }
-            }
-        }
-
-        // 5. If still missing, determine if blocked by quota limit, missing API key, or truly not found (ZERO scraping requests)
+        // 4. If not found in local catalog or cache, track is unavailable (0 external API calls)
         if (youtubeVideoId == null) {
-            if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
-                source = "api_key_missing";
-            } else if (!canSyncAlbumViaYouTube(clientId, albumId, hasCustomKey)) {
-                source = "limit_reached";
-            } else {
-                source = "unavailable";
-            }
+            source = "unavailable";
+        } else {
+            recordUserAlbumHistory(clientId, album, false);
         }
-
-        if (youtubeVideoId != null) {
-            recordUserAlbumHistory(clientId, album, newlyDiscovered);
-        }
-
-        int currentUsed = getSyncedAlbumCount(clientId);
-        int currentLimit = isOwnerAccount(clientId) ? -1 : (hasCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit);
-        int currentRemaining = getRemainingAlbumQuota(clientId, hasCustomKey);
 
         return new TrackPlaybackResponse(
                 track.getId(),
@@ -479,11 +403,15 @@ public class TrackPlaybackService {
                 coverArtUrl,
                 youtubeVideoId,
                 null,
-                source != null ? source : "unavailable",
-                newlyDiscovered,
-                currentUsed,
-                currentLimit,
-                currentRemaining
+                source,
+                false,
+                0,
+                0,
+                0,
+                0,
+                null,
+                null,
+                null
         );
     }
 
@@ -589,9 +517,18 @@ public class TrackPlaybackService {
 
     @Transactional
     public TrackPlaybackResponse handleRestrictedTrackAndResolveUnofficial(Long trackId, String clientId, String customApiKey) {
+        return handleRestrictedTrackAndResolveUnofficial(trackId, parseIdentityFromClientId(clientId), customApiKey);
+    }
+
+    @Transactional
+    public TrackPlaybackResponse handleRestrictedTrackAndResolveUnofficial(Long trackId, VerifiedIdentity identity, String customApiKey) {
         if (trackId == null) return null;
+        getSystemQuotaAuditTracker().startRequestTracking();
         Track track = trackRepository.findById(trackId).orElse(null);
-        if (track == null) return null;
+        if (track == null) {
+            getSystemQuotaAuditTracker().finishRequestTracking();
+            return null;
+        }
 
         Album album = track.getAlbum();
         String badVideoId = track.getYoutubeVideoId();
@@ -629,22 +566,10 @@ public class TrackPlaybackService {
                 trackRepository.saveAll(allAlbumTracks);
             }
 
-            // 3. Search and populate the entire album with a clean, unofficial / fan playlist using quota
-            boolean hasCustomKey = customApiKey != null && !customApiKey.isBlank();
-            String effectiveApiKey = hasCustomKey ? customApiKey.trim() : this.youtubeApiKey;
-
-            if (effectiveApiKey != null && !effectiveApiKey.isBlank()) {
-                log.info("[UNOFFICIAL-RESOLUTION] Attempting to find unofficial album playlist for [{}] by [{}]",
-                        album.getTitle(), album.getArtist() != null ? album.getArtist().getName() : "");
-                boolean populated = populateAlbumPlaylistTracks(album, clientId, effectiveApiKey, hasCustomKey, true);
-                if (populated) {
-                    log.info("[UNOFFICIAL-RESOLUTION] Successfully populated album [{}] with unofficial playlist tracks", album.getTitle());
-                }
-            }
         }
 
         // 4. Return new playback response for this track
-        return getPlayback(trackId, clientId, customApiKey);
+        return getPlayback(trackId, identity, customApiKey);
     }
 
     /**
@@ -717,6 +642,89 @@ public class TrackPlaybackService {
         return null;
     }
 
+    public List<Map<String, Object>> findAlbumCatalogRows(String artistName, Set<String> artistVariants, String albumTitle) {
+        if (jdbcTemplate == null || albumTitle == null || albumTitle.isBlank()) return Collections.emptyList();
+        String cleanAlbum = CatalogService.cleanAlbumTitleStatic(albumTitle);
+        boolean isLive = CatalogNormalizationUtils.isLiveOrAcousticTitle(albumTitle);
+
+        Set<String> allVariants = new LinkedHashSet<>();
+        if (artistName != null && !artistName.isBlank()) allVariants.add(artistName.trim());
+        if (artistVariants != null) allVariants.addAll(artistVariants);
+
+        // 1. Direct equality check
+        String exactSql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND (LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)) ORDER BY title";
+        for (String variant : allVariants) {
+            try {
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(exactSql, variant, albumTitle, cleanAlbum);
+                if (!rows.isEmpty()) {
+                    return rows;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 2. Direct prefix/edition match
+        String sql = """
+            SELECT song_id, title, duration, album FROM youtube_catalog
+            WHERE LOWER(artist) = LOWER(?)
+              AND (
+                LOWER(album) = LOWER(?)
+                OR LOWER(album) = LOWER(?)
+                OR LOWER(album) LIKE LOWER(?) || ' (%'
+                OR LOWER(album) LIKE LOWER(?) || ' - %'
+                OR LOWER(album) LIKE LOWER(?) || ':%'
+                OR LOWER(album) LIKE LOWER(?) || ' [%'
+                OR LOWER(album) LIKE LOWER(?) || ' (%'
+                OR LOWER(album) LIKE LOWER(?) || ' - %'
+              )
+            ORDER BY (CASE WHEN LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
+        """;
+
+        for (String variant : allVariants) {
+            try {
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                        sql, variant, albumTitle, cleanAlbum, albumTitle, albumTitle, albumTitle, albumTitle, cleanAlbum, cleanAlbum, albumTitle
+                );
+                if (!rows.isEmpty()) {
+                    return rows;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 3. Scan distinct candidate albums by artist in catalog and check isAlbumMatch
+        for (String variant : allVariants) {
+            try {
+                List<String> candAlbums = jdbcTemplate.query(
+                        "SELECT DISTINCT album FROM youtube_catalog WHERE LOWER(artist) = LOWER(?)",
+                        (rs, rowNum) -> rs.getString("album"),
+                        variant
+                );
+                List<String> matchedCandAlbums = new ArrayList<>();
+                for (String cand : candAlbums) {
+                    if (cand == null || cand.isBlank()) continue;
+                    if (isLive && !CatalogNormalizationUtils.isLiveOrAcousticTitle(cand)) continue;
+                    if (!isLive && CatalogNormalizationUtils.isLiveOrAcousticTitle(cand)) continue;
+                    if (CatalogService.isAlbumMatch(albumTitle, cand) || CatalogService.isAlbumMatch(cleanAlbum, cand)) {
+                        matchedCandAlbums.add(cand);
+                    }
+                }
+                if (!matchedCandAlbums.isEmpty()) {
+                    StringBuilder inQuery = new StringBuilder("SELECT song_id, title, duration, album FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND album IN (");
+                    for (int i = 0; i < matchedCandAlbums.size(); i++) {
+                        if (i > 0) inQuery.append(",");
+                        inQuery.append("'").append(matchedCandAlbums.get(i).replace("'", "''")).append("'");
+                    }
+                    inQuery.append(") ORDER BY duration DESC");
+                    List<Map<String, Object>> rows = jdbcTemplate.queryForList(inQuery.toString(), variant);
+                    if (!rows.isEmpty()) {
+                        return rows;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        return Collections.emptyList();
+    }
+
     /**
      * Resolves YouTube video ID from the local pre-indexed LAION-DISCO-12M dataset
      * in PostgreSQL (0 quota units, ~0.5ms indexed query).
@@ -729,7 +737,6 @@ public class TrackPlaybackService {
             if (title.isBlank() || artistName == null || artistName.isBlank()) return null;
 
             String albumTitle = (album != null && album.getTitle() != null) ? album.getTitle().trim() : "";
-            String cleanAlb = CatalogService.cleanAlbumTitleStatic(albumTitle);
 
             // 1. Gather artist variants (MBID aliases, transliteration & vowel variants, and catalog candidates)
             Set<String> artistVariants = new LinkedHashSet<>();
@@ -748,27 +755,7 @@ public class TrackPlaybackService {
             // 2. High-precision Album Level Resolution (0 quota units)
             // If album title is present, fetch the album's catalog tracklist and match via duration + phonetic title
             if (!albumTitle.isBlank()) {
-                try {
-                    String candSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)";
-                    List<String> candArtists = jdbcTemplate.query(candSql, (rs, rowNum) -> rs.getString("artist"), albumTitle, cleanAlb);
-                    for (String cand : candArtists) {
-                        if (cand != null && (CatalogNormalizationUtils.isArtistMatch(artistName, cand)
-                                || artistVariants.stream().anyMatch(v -> CatalogNormalizationUtils.isArtistMatch(v, cand)))) {
-                            artistVariants.add(cand);
-                        }
-                    }
-                } catch (Exception ignored) {}
-
-                String albSql = "SELECT song_id, title, duration, artist FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND (LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?))";
-                List<Map<String, Object>> albumCatalogRows = Collections.emptyList();
-                String matchedArtist = artistName;
-                for (String variant : artistVariants) {
-                    albumCatalogRows = jdbcTemplate.queryForList(albSql, variant, albumTitle, cleanAlb);
-                    if (!albumCatalogRows.isEmpty()) {
-                        matchedArtist = variant;
-                        break;
-                    }
-                }
+                List<Map<String, Object>> albumCatalogRows = findAlbumCatalogRows(artistName, artistVariants, albumTitle);
 
                 if (!albumCatalogRows.isEmpty()) {
                     for (Map<String, Object> crow : albumCatalogRows) {
@@ -784,7 +771,7 @@ public class TrackPlaybackService {
                                         videoId, track.getTitle(), artistName);
 
                                 if (album != null && album.getId() != null) {
-                                    populateSiblingTracksFromCatalog(album, matchedArtist);
+                                    populateSiblingTracksFromCatalog(album, artistName, albumCatalogRows);
                                 }
                                 return videoId;
                             }
@@ -794,6 +781,13 @@ public class TrackPlaybackService {
             }
 
             // 3. Fallback: Search youtube_catalog across artist variants by title
+            // STRICT GUARDRAIL: If this is a Live / Unplugged / Acoustic album, NEVER cross-match with studio albums!
+            boolean isLiveAlbum = CatalogNormalizationUtils.isLiveOrAcousticTitle(albumTitle);
+            if (isLiveAlbum) {
+                log.info("Skipping cross-album studio fallback for live/unplugged album [{}]", albumTitle);
+                return null;
+            }
+
             String sql = """
                 SELECT song_id FROM youtube_catalog
                 WHERE LOWER(artist) = LOWER(?)
@@ -849,7 +843,7 @@ public class TrackPlaybackService {
                             videoId, track.getTitle(), variant);
 
                     if (album != null && album.getId() != null) {
-                        populateSiblingTracksFromCatalog(album, variant);
+                        populateSiblingTracksFromCatalog(album, variant, Collections.emptyList());
                     }
                     return videoId;
                 }
@@ -865,19 +859,24 @@ public class TrackPlaybackService {
      * Batch populates all missing sibling tracks in an album from youtube_catalog (0 quota units).
      */
     public void populateSiblingTracksFromCatalog(Album album, String artistName) {
+        populateSiblingTracksFromCatalog(album, artistName, Collections.emptyList());
+    }
+
+    public void populateSiblingTracksFromCatalog(Album album, String artistName, List<Map<String, Object>> preloadedRows) {
         if (jdbcTemplate == null || album == null || album.getId() == null) return;
         try {
             List<Track> albumTracks = trackRepository.findByAlbumIdOrderByPosition(album.getId());
+            boolean isLiveAlbum = CatalogNormalizationUtils.isLiveOrAcousticTitle(album.getTitle());
+
+            // For live albums, also inspect tracks whose existing IDs might be bad studio matches
             List<Track> missingTracks = albumTracks.stream()
-                    .filter(t -> t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank())
+                    .filter(t -> t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank() || isLiveAlbum)
                     .toList();
 
             if (missingTracks.isEmpty()) return;
 
             String albumTitle = album.getTitle() != null ? album.getTitle().trim() : "";
-            String cleanAlb = CatalogService.cleanAlbumTitleStatic(albumTitle);
 
-            // Fetch catalog tracks for this album
             Set<String> artistVariants = new LinkedHashSet<>();
             artistVariants.addAll(CatalogNormalizationUtils.generateArtistVariants(artistName));
             if (album.getArtist() != null && album.getArtist().getMusicBrainzId() != null && artistRepository != null) {
@@ -890,34 +889,14 @@ public class TrackPlaybackService {
                     }
                 } catch (Exception ignored) {}
             }
-            try {
-                String candSql = "SELECT DISTINCT artist FROM youtube_catalog WHERE LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?)";
-                List<String> candArtists = jdbcTemplate.query(candSql, (rs, rowNum) -> rs.getString("artist"), albumTitle, cleanAlb);
-                for (String cand : candArtists) {
-                    if (cand != null && (CatalogNormalizationUtils.isArtistMatch(artistName, cand)
-                            || artistVariants.stream().anyMatch(v -> CatalogNormalizationUtils.isArtistMatch(v, cand)))) {
-                        artistVariants.add(cand);
-                    }
-                }
-            } catch (Exception ignored) {}
 
-            List<Map<String, Object>> albumCatalogRows = Collections.emptyList();
-            String albSql = "SELECT song_id, title, duration FROM youtube_catalog WHERE LOWER(artist) = LOWER(?) AND (LOWER(album) = LOWER(?) OR LOWER(album) = LOWER(?))";
-            for (String variant : artistVariants) {
-                albumCatalogRows = jdbcTemplate.queryForList(albSql, variant, albumTitle, cleanAlb);
-                if (!albumCatalogRows.isEmpty()) {
-                    break;
-                }
-            }
+            List<Map<String, Object>> albumCatalogRows = (preloadedRows != null && !preloadedRows.isEmpty())
+                    ? preloadedRows
+                    : findAlbumCatalogRows(artistName, artistVariants, albumTitle);
 
             int populatedCount = 0;
             List<Track> toSave = new ArrayList<>();
             Set<String> usedSongIds = new HashSet<>();
-            albumTracks.forEach(t -> {
-                if (t.getYoutubeVideoId() != null && !t.getYoutubeVideoId().isBlank()) {
-                    usedSongIds.add(t.getYoutubeVideoId().trim());
-                }
-            });
 
             for (Track t : missingTracks) {
                 String title = t.getTitle() != null ? t.getTitle().trim() : "";
@@ -936,41 +915,53 @@ public class TrackPlaybackService {
                     }
                 }
 
-                // 2. If not matched in album catalog rows, try fallback queries across catalog
-                if (matchedVid == null) {
+                // 2. If not matched in album catalog rows, try fallback queries across catalog ONLY if not a live/acoustic album
+                if (matchedVid == null && !isLiveAlbum) {
                     String sql = """
-                        SELECT song_id FROM youtube_catalog
+                        SELECT song_id, duration, album, title FROM youtube_catalog
                         WHERE LOWER(artist) = LOWER(?)
                           AND LOWER(title) = LOWER(?)
                         ORDER BY (CASE WHEN ? != '' AND LOWER(album) = LOWER(?) THEN 0 ELSE 1 END), duration DESC
-                        LIMIT 1
+                        LIMIT 5
                     """;
                     for (String variant : artistVariants) {
-                        List<String> results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("song_id"), variant, title, albumTitle, albumTitle);
-                        if (results.isEmpty()) {
+                        List<Map<String, Object>> candidateRows = jdbcTemplate.queryForList(sql, variant, title, albumTitle, albumTitle);
+                        if (candidateRows.isEmpty()) {
                             String normalized = normalizeTitleForCatalog(title);
                             if (!normalized.equalsIgnoreCase(title) && !normalized.isBlank()) {
-                                results = jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("song_id"), variant, normalized, albumTitle, albumTitle);
+                                candidateRows = jdbcTemplate.queryForList(sql, variant, normalized, albumTitle, albumTitle);
                             }
                         }
-                        if (!results.isEmpty() && results.get(0) != null && !results.get(0).isBlank()) {
-                            matchedVid = results.get(0).trim();
-                            break;
+                        for (Map<String, Object> crow : candidateRows) {
+                            Integer durSec = crow.get("duration") != null ? ((Number) crow.get("duration")).intValue() : null;
+                            if (t.getLengthMilliseconds() != null && t.getLengthMilliseconds() > 0) {
+                                if (!CatalogNormalizationUtils.isDurationMatch(t.getLengthMilliseconds(), durSec)) {
+                                    continue;
+                                }
+                            }
+                            String songId = (String) crow.get("song_id");
+                            if (songId != null && !usedSongIds.contains(songId)) {
+                                matchedVid = songId.trim();
+                                break;
+                            }
                         }
+                        if (matchedVid != null) break;
                     }
                 }
 
                 if (matchedVid != null && !matchedVid.isBlank()) {
-                    t.setYoutubeVideoId(matchedVid.trim());
+                    if (!matchedVid.equals(t.getYoutubeVideoId())) {
+                        t.setYoutubeVideoId(matchedVid.trim());
+                        toSave.add(t);
+                        populatedCount++;
+                    }
                     usedSongIds.add(matchedVid.trim());
-                    toSave.add(t);
-                    populatedCount++;
                 }
             }
 
             if (!toSave.isEmpty()) {
                 trackRepository.saveAll(toSave);
-                log.info("Batch populated {}/{} missing sibling tracks for album [{}] from youtube_catalog (0 units)",
+                log.info("Batch populated/updated {}/{} sibling tracks for album [{}] from youtube_catalog (0 units)",
                         populatedCount, missingTracks.size(), album.getTitle());
             }
         } catch (Exception ex) {
@@ -995,201 +986,20 @@ public class TrackPlaybackService {
      * Resolves the official YouTube playlist for an album and batch-populates all missing track video IDs.
      */
     private boolean populateAlbumPlaylistTracks(Album album, String clientId, String effectiveApiKey, boolean isCustomKey) {
-        return populateAlbumPlaylistTracks(album, clientId, effectiveApiKey, isCustomKey, false);
+        return false;
     }
 
     private boolean populateAlbumPlaylistTracks(Album album, String clientId, String effectiveApiKey, boolean isCustomKey, boolean preferUnofficial) {
-        if (album == null || album.getId() == null) return false;
-
-        List<Track> albumTracks = trackRepository.findByAlbumIdOrderByPosition(album.getId());
-        if (albumTracks.isEmpty()) return false;
-
-        boolean hasMissing = albumTracks.stream().anyMatch(t -> t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank());
-        if (!hasMissing && !preferUnofficial) {
-            return false;
-        }
-
-        String artistName = (album.getArtist() != null) ? album.getArtist().getName() : "";
-        List<PlaylistItem> workingPlaylistItems = null;
-        String workingPlaylistId = null;
-        boolean newlyDiscovered = false;
-
-        // 1. If not preferUnofficial and album already has a saved youtubePlaylistId, verify if it yields playable and matching tracks
-        if (!preferUnofficial && album.getYoutubePlaylistId() != null && !album.getYoutubePlaylistId().isBlank()) {
-            if (!isRestrictedPlaylistId(album.getYoutubePlaylistId())) {
-                List<PlaylistItem> items = fetchPlaylistItems(album.getYoutubePlaylistId(), effectiveApiKey);
-                if (items != null && !items.isEmpty()) {
-                    int matchScore = calculatePlaylistMatchScore(albumTracks, items, artistName, album.getTitle());
-                    double matchRatio = (double) matchScore / albumTracks.size();
-                    if (matchRatio >= 0.90 || (albumTracks.size() <= 2 && matchRatio >= 0.50)) {
-                        workingPlaylistId = album.getYoutubePlaylistId();
-                        workingPlaylistItems = items;
-                        log.info("Stored playlist [{}] verified for album [{}] with {}/{} track title matches",
-                                workingPlaylistId, album.getTitle(), matchScore, albumTracks.size());
-                    } else {
-                        log.warn("Stored playlist ID [{}] for album [{}] had low title match ratio ({}/{} tracks matched). Clearing stored playlist to search for complete release.",
-                                album.getYoutubePlaylistId(), album.getTitle(), matchScore, albumTracks.size());
-                        album.setYoutubePlaylistId(null);
-                        albumRepository.save(album);
-                    }
-                } else {
-                    log.warn("Stored playlist ID [{}] for album [{}] returned 404 or empty. Clearing and falling back to discovery.",
-                            album.getYoutubePlaylistId(), album.getTitle());
-                    album.setYoutubePlaylistId(null);
-                    albumRepository.save(album);
-                }
-            } else {
-                log.warn("Stored playlist ID [{}] for album [{}] is blacklisted as restricted. Clearing stored playlist.",
-                        album.getYoutubePlaylistId(), album.getTitle());
-                album.setYoutubePlaylistId(null);
-                albumRepository.save(album);
-            }
-        }
-
-        // 2. Try direct playlist ID from MusicBrainz release-group relations (Only in normal official mode)
-        if (!preferUnofficial && enableMusicBrainzIds && workingPlaylistId == null) {
-            String mbPlaylistId = resolveMusicBrainzPlaylistId(album);
-            if (mbPlaylistId != null && !mbPlaylistId.isBlank() && !isRestrictedPlaylistId(mbPlaylistId)) {
-                List<PlaylistItem> candidateItems = fetchPlaylistItems(mbPlaylistId, effectiveApiKey);
-                if (candidateItems != null && !candidateItems.isEmpty()) {
-                    int matchScore = calculatePlaylistMatchScore(albumTracks, candidateItems, artistName, album.getTitle());
-                    double matchRatio = (double) matchScore / albumTracks.size();
-                    if (matchRatio >= 0.60 || (albumTracks.size() <= 2 && matchRatio >= 0.50)) {
-                        workingPlaylistId = mbPlaylistId;
-                        workingPlaylistItems = candidateItems;
-                        album.setYoutubePlaylistId(workingPlaylistId);
-                        albumRepository.save(album);
-                        log.info("MusicBrainz playlist [{}] verified for album [{}] with {}/{} track title matches (0 search units)",
-                                workingPlaylistId, album.getTitle(), matchScore, albumTracks.size());
-                    } else {
-                        log.warn("MusicBrainz playlist ID [{}] for [{}] failed track title validation ({}/{} matched). Falling back to YouTube search.",
-                                mbPlaylistId, album.getTitle(), matchScore, albumTracks.size());
-                    }
-                } else {
-                    log.warn("MusicBrainz playlist ID [{}] for [{}] returned 404 or no tracks. Falling back to YouTube API search.",
-                            mbPlaylistId, album.getTitle());
-                }
-            }
-        }
-
-        // 3. YouTube Data API Multi-Candidate Search (100 units)
-        if (workingPlaylistId == null) {
-            List<CandidatePlaylist> candidates = searchYouTubeForCandidatePlaylists(artistName, album.getTitle(), clientId, album.getId(), effectiveApiKey, isCustomKey, preferUnofficial);
-            CandidatePlaylist bestCand = null;
-            List<PlaylistItem> bestItems = null;
-            int bestScore = 0;
-
-            int testedCount = 0;
-            for (CandidatePlaylist cand : candidates) {
-                if (testedCount >= 4) break; // Check at most top 4 candidates to conserve quota
-                if (isRestrictedPlaylistId(cand.id())) continue;
-                testedCount++;
-
-                List<PlaylistItem> candidateItems = fetchPlaylistItems(cand.id(), effectiveApiKey);
-                if (candidateItems != null && !candidateItems.isEmpty()) {
-                    int score = calculatePlaylistMatchScore(albumTracks, candidateItems, artistName, album.getTitle());
-                    log.info("Candidate playlist [{}] ({}) by [{}] matched {}/{} tracks (initial score: {}, preferUnofficial: {})",
-                            cand.title(), cand.id(), cand.channelTitle(), score, albumTracks.size(), cand.initialScore(), preferUnofficial);
-
-                    if (score == albumTracks.size() && cand.initialScore() >= 0) {
-                        bestCand = cand;
-                        bestItems = candidateItems;
-                        bestScore = score;
-                        break;
-                    } else if (score > bestScore) {
-                        bestCand = cand;
-                        bestItems = candidateItems;
-                        bestScore = score;
-                    }
-                }
-            }
-
-            if (bestCand != null) {
-                double ratio = (double) bestScore / albumTracks.size();
-                if (ratio >= 0.70 || (albumTracks.size() <= 2 && ratio >= 0.50)) {
-                    workingPlaylistId = bestCand.id();
-                    workingPlaylistItems = bestItems;
-                    album.setYoutubePlaylistId(workingPlaylistId);
-                    albumRepository.save(album);
-                    newlyDiscovered = true;
-                    recordAlbumSynced(clientId, album.getId());
-                    log.info("[QUOTA-USAGE] Selected best verified playlist [{}] ({}) by [{}] for album [{}] - {}/{} tracks matched (preferUnofficial: {}, Key: {})",
-                            bestCand.title(), bestCand.id(), bestCand.channelTitle(), album.getTitle(), bestScore, albumTracks.size(), preferUnofficial, isCustomKey ? "personal" : "system");
-                }
-            }
-        }
-
-        // 4. Batch populate album tracks with verified video IDs (NEVER blind index zipping)
-        if (workingPlaylistItems != null && !workingPlaylistItems.isEmpty()) {
-            Map<Long, String> trackToVideoMap = new HashMap<>();
-            Set<String> usedVideoIds = new HashSet<>();
-
-            // Pass 1: Strict sequential matching (if track[i] matches playlistItem[i])
-            for (int i = 0; i < albumTracks.size() && i < workingPlaylistItems.size(); i++) {
-                Track t = albumTracks.get(i);
-                PlaylistItem item = workingPlaylistItems.get(i);
-                if (isTrackTitleMatch(t.getTitle(), item.title(), artistName, album.getTitle())) {
-                    if (!isRestrictedVideoId(item.videoId())) {
-                        trackToVideoMap.put(t.getId(), item.videoId());
-                        usedVideoIds.add(item.videoId());
-                    } else {
-                        log.warn("Skipping blacklisted restricted video ID [{}] for track [{}] ({})", item.videoId(), t.getId(), t.getTitle());
-                    }
-                }
-            }
-
-            // Pass 2: Search remaining playlist items for any unmatched tracks
-            for (Track t : albumTracks) {
-                if (trackToVideoMap.containsKey(t.getId())) continue;
-                for (PlaylistItem item : workingPlaylistItems) {
-                    if (!usedVideoIds.contains(item.videoId()) && isTrackTitleMatch(t.getTitle(), item.title(), artistName, album.getTitle())) {
-                        if (!isRestrictedVideoId(item.videoId())) {
-                            trackToVideoMap.put(t.getId(), item.videoId());
-                            usedVideoIds.add(item.videoId());
-                            break;
-                        } else {
-                            log.warn("Skipping blacklisted restricted video ID [{}] for track [{}] ({})", item.videoId(), t.getId(), t.getTitle());
-                        }
-                    }
-                }
-            }
-
-            boolean changed = false;
-            for (Track t : albumTracks) {
-                String matchedVid = trackToVideoMap.get(t.getId());
-                if (matchedVid != null && !matchedVid.equals(t.getYoutubeVideoId())) {
-                    t.setYoutubeVideoId(matchedVid);
-                    changed = true;
-                }
-            }
-            if (changed) {
-                trackRepository.saveAll(albumTracks);
-                log.info("[QUOTA-USAGE] Batch-saved title-verified YouTube video IDs for album [{}] ({}) via playlist [{}] ({} tracks populated | Key: {})",
-                        album.getTitle(), album.getId(), workingPlaylistId, trackToVideoMap.size(),
-                        isCustomKey ? "personal_key" : "system_key");
-            }
-        }
-
-        // In preferUnofficial mode, if any track is still missing, search single track unofficial videos
-        if (preferUnofficial && effectiveApiKey != null && !effectiveApiKey.isBlank()) {
-            boolean anySingleUpdated = false;
-            for (Track t : albumTracks) {
-                if (t.getYoutubeVideoId() == null || t.getYoutubeVideoId().isBlank()) {
-                    String singleVid = searchYouTubeForSingleTrack(artistName, t.getTitle(), album.getTitle(), effectiveApiKey, true);
-                    if (singleVid != null && !singleVid.isBlank()) {
-                        t.setYoutubeVideoId(singleVid);
-                        anySingleUpdated = true;
-                    }
-                }
-            }
-            if (anySingleUpdated) {
-                trackRepository.saveAll(albumTracks);
-                log.info("[UNOFFICIAL-RESOLUTION] Populated missing tracks individually via unofficial searches for [{}]", album.getTitle());
-            }
-        }
-
-        return newlyDiscovered;
+        return false;
     }
+
+    private boolean doPopulateAlbumPlaylistTracks(Album album, String clientId, String effectiveApiKey, boolean isCustomKey, boolean preferUnofficial) {
+        return false;
+    }
+
+
+
+
 
     /**
      * Resolves direct YouTube playlist relation from MusicBrainz release-group relations (0 search units).
@@ -1231,195 +1041,22 @@ public class TrackPlaybackService {
      * Retrieves candidate playlists and scores them to prioritize official or unofficial releases based on preference.
      */
     private List<CandidatePlaylist> searchYouTubeForCandidatePlaylists(String artistName, String albumTitle, String clientId, Long albumId, String effectiveApiKey, boolean isCustomKey) {
-        return searchYouTubeForCandidatePlaylists(artistName, albumTitle, clientId, albumId, effectiveApiKey, isCustomKey, false);
+        return Collections.emptyList();
     }
 
     private List<CandidatePlaylist> searchYouTubeForCandidatePlaylists(String artistName, String albumTitle, String clientId, Long albumId, String effectiveApiKey, boolean isCustomKey, boolean preferUnofficial) {
-        List<CandidatePlaylist> candidates = new ArrayList<>();
-        if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
-            log.warn("YouTube API key is not configured. Skipping YouTube playlist search (0 quota units).");
-            return candidates;
-        }
-
-        if (!canSyncAlbumViaYouTube(clientId, albumId, isCustomKey)) {
-            int limit = isCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit;
-            log.warn("[QUOTA-LIMIT] Client [{}] has reached YouTube API album discovery limit ({}/{} albums | Key: {}). Skipping search for [{}] to protect API quota.",
-                    clientId, getSyncedAlbumCount(clientId), limit, isCustomKey ? "personal" : "system", albumTitle);
-            return candidates;
-        }
-
-        String query = preferUnofficial
-                ? (artistName + " " + albumTitle + " full album").trim()
-                : (artistName + " " + albumTitle + " album").trim();
-        try {
-            int currentCount = getSyncedAlbumCount(clientId);
-            boolean isOwner = isOwnerAccount(clientId);
-            int effectiveLimit = isCustomKey ? PERSONAL_KEY_ALBUM_SYNC_LIMIT : albumSyncLimit;
-            if (isCustomKey) {
-                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) using PERSONAL API key for [{}] [Cost: 100 quota units | Album {}/{} | 10k Quota | preferUnofficial: {}]",
-                        clientId, query, currentCount + 1, effectiveLimit, preferUnofficial);
-            } else {
-                log.info("[QUOTA-USAGE] Client [{}] querying YouTube Data API search.list (type=playlist) for [{}] [Cost: 100 quota units | Album {}/{} | Owner: {} | preferUnofficial: {}]",
-                        clientId, query, currentCount + 1, isOwner ? "UNLIMITED" : effectiveLimit, isOwner, preferUnofficial);
-            }
-
-            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String apiUrl = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=playlist&maxResults=10&q="
-                    + encodedQuery + "&key=" + effectiveApiKey;
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiUrl))
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200 && response.body() != null) {
-                JsonNode root = objectMapper.readTree(response.body());
-                JsonNode items = root.path("items");
-                if (items.isArray() && !items.isEmpty()) {
-                    for (JsonNode item : items) {
-                        String pid = item.path("id").path("playlistId").asText();
-                        String pTitle = item.path("snippet").path("title").asText();
-                        String channelTitle = item.path("snippet").path("channelTitle").asText();
-
-                        if (pid.isBlank()) continue;
-
-                        int score = scoreCandidatePlaylist(pid, pTitle, channelTitle, artistName, albumTitle, preferUnofficial);
-                        candidates.add(new CandidatePlaylist(pid, pTitle, channelTitle, score));
-                    }
-
-                    // Sort descending by initial score
-                    candidates.sort(Comparator.comparingInt(CandidatePlaylist::initialScore).reversed());
-                }
-            } else {
-                log.warn("YouTube Data API search returned HTTP {}: {}", response.statusCode(), response.body());
-            }
-        } catch (Exception ex) {
-            log.warn("YouTube Data API playlist search error for [{}]: {}", query, ex.getMessage());
-        }
-
-        return candidates;
+        return Collections.emptyList();
     }
 
-    /**
-     * Extracts video items (ID + Title) from a YouTube playlist using official YouTube Data API playlistItems.list (1 unit).
-     */
     private List<PlaylistItem> fetchPlaylistItems(String playlistId, String effectiveApiKey) {
-        List<PlaylistItem> itemsList = new ArrayList<>();
-        if (effectiveApiKey == null || effectiveApiKey.isBlank() || playlistId == null || playlistId.isBlank()) {
-            return itemsList;
-        }
-
-        if (isRestrictedPlaylistId(playlistId)) {
-            log.warn("Skipping blacklisted restricted playlist [{}]", playlistId);
-            return itemsList;
-        }
-
-        try {
-            log.info("[QUOTA-USAGE] Querying YouTube Data API playlistItems.list for playlist [{}] [Cost: 1 quota unit]", playlistId);
-            String apiUrl = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId="
-                    + URLEncoder.encode(playlistId, StandardCharsets.UTF_8)
-                    + "&key=" + effectiveApiKey;
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiUrl))
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200 && response.body() != null) {
-                JsonNode root = objectMapper.readTree(response.body());
-                JsonNode items = root.path("items");
-                if (items.isArray()) {
-                    for (JsonNode item : items) {
-                        String vid = item.path("contentDetails").path("videoId").asText();
-                        String title = item.path("snippet").path("title").asText();
-                        if (!vid.isBlank() && !isRestrictedVideoId(vid) && itemsList.stream().noneMatch(p -> p.videoId().equals(vid))) {
-                            itemsList.add(new PlaylistItem(vid, title));
-                        }
-                    }
-                }
-                if (!itemsList.isEmpty()) {
-                    log.info("[QUOTA-USAGE] Fetched {} track items from playlist [{}] via YouTube Data API (1 quota unit)", itemsList.size(), playlistId);
-                    return itemsList;
-                }
-            } else {
-                log.warn("YouTube Data API playlistItems returned HTTP {}: {}", response.statusCode(), response.body());
-            }
-        } catch (Exception ex) {
-            log.warn("YouTube Data API playlistItems fetch failed for [{}]: {}", playlistId, ex.getMessage());
-        }
-
-        return itemsList;
+        return Collections.emptyList();
     }
 
-    /**
-     * Searches YouTube Data API specifically for an individual missing track with title verification.
-     */
     private String searchYouTubeForSingleTrack(String artistName, String trackTitle, String albumTitle, String effectiveApiKey) {
-        return searchYouTubeForSingleTrack(artistName, trackTitle, albumTitle, effectiveApiKey, false);
+        return null;
     }
 
     private String searchYouTubeForSingleTrack(String artistName, String trackTitle, String albumTitle, String effectiveApiKey, boolean preferUnofficial) {
-        if (effectiveApiKey == null || effectiveApiKey.isBlank() || trackTitle == null || trackTitle.isBlank()) {
-            return null;
-        }
-        try {
-            List<String> queryCandidates = new ArrayList<>();
-            if (preferUnofficial) {
-                queryCandidates.add((artistName + " " + trackTitle + " lyrics").trim());
-                if (albumTitle != null && !albumTitle.isBlank()) {
-                    queryCandidates.add((artistName + " " + trackTitle + " " + albumTitle + " lyrics").trim());
-                }
-            } else {
-                // Direct query without cluttering: yields official Topic or artist uploads as #1 result
-                queryCandidates.add((artistName + " " + trackTitle).trim());
-                if (albumTitle != null && !albumTitle.isBlank()) {
-                    queryCandidates.add((artistName + " " + trackTitle + " " + albumTitle).trim());
-                }
-            }
-
-            for (String q : queryCandidates) {
-                String encoded = URLEncoder.encode(q, StandardCharsets.UTF_8);
-                String url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q="
-                        + encoded + "&key=" + effectiveApiKey;
-
-                HttpRequest req = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .timeout(Duration.ofSeconds(6))
-                        .GET()
-                        .build();
-
-                HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() == 200 && resp.body() != null) {
-                    JsonNode root = objectMapper.readTree(resp.body());
-                    JsonNode items = root.path("items");
-                    if (items.isArray()) {
-                        for (JsonNode it : items) {
-                            String vid = it.path("id").path("videoId").asText();
-                            String vTitle = it.path("snippet").path("title").asText();
-                            String channelTitle = it.path("snippet").path("channelTitle").asText().toLowerCase();
-
-                            if (vid.isBlank() || isRestrictedVideoId(vid)) {
-                                continue;
-                            }
-
-                            if (preferUnofficial && (channelTitle.contains("topic") || channelTitle.contains("vevo"))) {
-                                continue;
-                            }
-
-                            if (isTrackTitleMatch(trackTitle, vTitle, artistName, albumTitle)) {
-                                log.info("Found single track video ID [{}] (\"{}\") for track [{}] via YouTube Data API search (preferUnofficial: {})",
-                                        vid, vTitle, trackTitle, preferUnofficial);
-                                return vid;
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception ex) {
-            log.warn("Single-track search failed for [{} - {}]: {}", artistName, trackTitle, ex.getMessage());
-        }
         return null;
     }
 

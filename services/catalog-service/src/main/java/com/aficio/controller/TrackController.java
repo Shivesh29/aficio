@@ -14,6 +14,8 @@ import com.aficio.musicbrainz.MusicBrainzMedia;
 import com.aficio.musicbrainz.MusicBrainzRecording;
 import com.aficio.musicbrainz.MusicBrainzReleaseDetails;
 import com.aficio.musicbrainz.MusicBrainzTrack;
+import com.aficio.security.JwtIdentityResolver;
+import com.aficio.security.VerifiedIdentity;
 import com.aficio.track.Track;
 import com.aficio.track.TrackPlaybackService;
 import com.aficio.track.TrackRepository;
@@ -36,6 +38,7 @@ public class TrackController {
     private final TrackPlaybackService trackPlaybackService;
     private final com.aficio.catalog.CatalogService catalogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final JwtIdentityResolver jwtIdentityResolver;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TrackController.class);
 
     public TrackController(
@@ -44,7 +47,8 @@ public class TrackController {
             MusicBrainzClient musicBrainzClient,
             TrackPlaybackService trackPlaybackService,
             com.aficio.catalog.CatalogService catalogService,
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+            JwtIdentityResolver jwtIdentityResolver
     ) {
         this.trackRepository = trackRepository;
         this.albumRepository = albumRepository;
@@ -52,6 +56,7 @@ public class TrackController {
         this.trackPlaybackService = trackPlaybackService;
         this.catalogService = catalogService;
         this.objectMapper = objectMapper;
+        this.jwtIdentityResolver = jwtIdentityResolver;
     }
 
     @GetMapping("/tracks")
@@ -74,17 +79,17 @@ public class TrackController {
             @RequestParam(value = "apiKey", required = false) String queryApiKey,
             jakarta.servlet.http.HttpServletRequest request
     ) {
-        String clientId = resolveClientId(request);
+        VerifiedIdentity identity = jwtIdentityResolver.resolve(request);
         String headerApiKey = request != null ? request.getHeader("X-YouTube-API-Key") : null;
         String customApiKey = (headerApiKey != null && !headerApiKey.isBlank())
                 ? headerApiKey.trim()
                 : (queryApiKey != null && !queryApiKey.isBlank() ? queryApiKey.trim() : null);
 
-        if ((customApiKey == null || customApiKey.isBlank()) && clientId != null && clientId.startsWith("user:")) {
-            customApiKey = trackPlaybackService.resolveUserCloudApiKey(clientId);
+        if ((customApiKey == null || customApiKey.isBlank()) && identity.isAuthenticated()) {
+            customApiKey = trackPlaybackService.resolveUserCloudApiKey(identity.toClientId(null));
         }
 
-        return trackPlaybackService.getPlayback(id, clientId, customApiKey);
+        return trackPlaybackService.getPlayback(id, identity, customApiKey);
     }
 
     @GetMapping("/catalog/quota")
@@ -92,78 +97,34 @@ public class TrackController {
             @RequestParam(value = "apiKey", required = false) String queryApiKey,
             jakarta.servlet.http.HttpServletRequest request
     ) {
-        String clientId = resolveClientId(request);
+        VerifiedIdentity identity = jwtIdentityResolver.resolve(request);
         String headerApiKey = request != null ? request.getHeader("X-YouTube-API-Key") : null;
         String customApiKey = (headerApiKey != null && !headerApiKey.isBlank())
                 ? headerApiKey.trim()
                 : (queryApiKey != null && !queryApiKey.isBlank() ? queryApiKey.trim() : null);
 
-        if ((customApiKey == null || customApiKey.isBlank()) && clientId != null && clientId.startsWith("user:")) {
-            customApiKey = trackPlaybackService.resolveUserCloudApiKey(clientId);
+        if ((customApiKey == null || customApiKey.isBlank()) && identity.isAuthenticated()) {
+            customApiKey = trackPlaybackService.resolveUserCloudApiKey(identity.toClientId(null));
         }
 
-        return trackPlaybackService.getUserQuota(clientId, customApiKey);
+        return trackPlaybackService.getUserQuota(identity, customApiKey);
     }
 
     private String resolveClientId(jakarta.servlet.http.HttpServletRequest request) {
-        if (request == null) return "default";
-
-        // 0. Check explicit user identity headers
-        String headerUsername = request.getHeader("X-User-Username");
-        if (headerUsername == null || headerUsername.isBlank()) {
-            headerUsername = request.getHeader("X-User-Identity");
-        }
-        if (headerUsername != null && !headerUsername.isBlank()) {
-            return "user:" + headerUsername.trim();
-        }
-
-        // 1. Try extracting subject/username and email from Authorization Bearer JWT
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7).trim();
-            String[] parts = token.split("\\.");
-            if (parts.length >= 2) {
-                try {
-                    byte[] decoded = java.util.Base64.getUrlDecoder().decode(parts[1]);
-                    com.fasterxml.jackson.databind.JsonNode payload = objectMapper.readTree(decoded);
-                    String sub = payload.has("sub") ? payload.get("sub").asText() : "";
-                    String email = payload.has("email") ? payload.get("email").asText() : "";
-                    if (!email.isBlank()) {
-                        return "user:" + sub + ":" + email;
-                    }
-                    if (!sub.isBlank()) {
-                        return "user:" + sub;
-                    }
-                } catch (Exception ignored) {}
-            }
-        }
-
-        // 2. Check X-User-Email header
-        String headerEmail = request.getHeader("X-User-Email");
-        if (headerEmail != null && !headerEmail.isBlank()) {
-            return "email:" + headerEmail.trim();
-        }
-
-        // 3. Try forwarded client IP
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return "ip:" + forwardedFor.split(",")[0].trim();
-        }
-
-        // 4. Fallback to remote address
-        String remoteAddr = request.getRemoteAddr();
-        if (remoteAddr != null && !remoteAddr.isBlank()) {
-            return "ip:" + remoteAddr;
-        }
-
-        return "default";
+        VerifiedIdentity identity = jwtIdentityResolver.resolve(request);
+        return identity.toClientId(null);
     }
 
     @PutMapping("/tracks/{id}/youtube-video-id")
     public org.springframework.http.ResponseEntity<Void> updateYoutubeVideoId(
             @PathVariable Long id,
-            @RequestBody(required = false) java.util.Map<String, String> body
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            jakarta.servlet.http.HttpServletRequest request
     ) {
+        VerifiedIdentity identity = jwtIdentityResolver.resolve(request);
+        if (!identity.isDevAccount()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only dev account can update track video IDs");
+        }
         if (body != null && body.containsKey("youtubeVideoId")) {
             trackPlaybackService.saveYoutubeVideoId(id, body.get("youtubeVideoId"));
         }
@@ -177,16 +138,16 @@ public class TrackController {
             @RequestParam(value = "apiKey", required = false) String queryApiKey,
             jakarta.servlet.http.HttpServletRequest request
     ) {
-        String clientId = resolveClientId(request);
+        VerifiedIdentity identity = jwtIdentityResolver.resolve(request);
         String customApiKey = (headerApiKey != null && !headerApiKey.isBlank())
                 ? headerApiKey.trim()
                 : (queryApiKey != null && !queryApiKey.isBlank() ? queryApiKey.trim() : null);
 
-        if ((customApiKey == null || customApiKey.isBlank()) && clientId != null && clientId.startsWith("user:")) {
-            customApiKey = trackPlaybackService.resolveUserCloudApiKey(clientId);
+        if ((customApiKey == null || customApiKey.isBlank()) && identity.isAuthenticated()) {
+            customApiKey = trackPlaybackService.resolveUserCloudApiKey(identity.toClientId(null));
         }
 
-        TrackPlaybackResponse response = trackPlaybackService.handleRestrictedTrackAndResolveUnofficial(id, clientId, customApiKey);
+        TrackPlaybackResponse response = trackPlaybackService.handleRestrictedTrackAndResolveUnofficial(id, identity, customApiKey);
         if (response != null && response.youtubeVideoId() != null) {
             return org.springframework.http.ResponseEntity.ok(response);
         }

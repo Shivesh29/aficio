@@ -205,4 +205,13 @@ public final class CatalogNormalizationUtils {
 
         return calculateStringSimilarity(p1, p2) >= 0.75;
     }
+
+    private static final Pattern LIVE_OR_SPECIAL_PATTERN = Pattern.compile(
+            "(?i)\\b(live|unplugged|acoustic|session|sessions|concert|in concert|tour|bbc|rehearsal)\\b"
+    );
+
+    public static boolean isLiveOrAcousticTitle(String title) {
+        if (title == null || title.isBlank()) return false;
+        return LIVE_OR_SPECIAL_PATTERN.matcher(title).find();
+    }
 }

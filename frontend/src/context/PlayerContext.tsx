@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { api, type Album, type Track, type TrackPlaybackResponse } from '../api/client';
+import { useAuth } from './useAuth';
 
 interface PlayerContextType {
   currentPlayback: TrackPlaybackResponse | null;
@@ -17,8 +18,6 @@ interface PlayerContextType {
   currentAlbum: Album | null;
   currentIndex: number;
   error: string | null;
-  discoveryNotice: { albumTitle: string; used: number; limit: number; remaining: number } | null;
-  dismissDiscoveryNotice: () => void;
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   playTrack: (track: Track, album?: Album | null, tracklist?: Track[]) => Promise<void>;
   togglePlay: () => void;
@@ -32,11 +31,14 @@ interface PlayerContextType {
   closePlayer: () => void;
   toggleExpanded: () => void;
   setIsPlaying: (playing: boolean) => void;
+  isGuestPromptOpen: boolean;
+  closeGuestPrompt: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated } = useAuth();
   const [currentPlayback, setCurrentPlayback] = useState<TrackPlaybackResponse | null>(null);
   const [currentTrackId, setCurrentTrackId] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -45,21 +47,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isExpanded, setIsExpanded] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
-  const [discoveryNotice, setDiscoveryNotice] = useState<{
-    albumTitle: string;
-    used: number;
-    limit: number;
-    remaining: number;
-  } | null>(null);
-  const discoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isGuestPromptOpen, setIsGuestPromptOpen] = useState(false);
 
-  const dismissDiscoveryNotice = useCallback(() => {
-    if (discoveryTimerRef.current) {
-      clearTimeout(discoveryTimerRef.current);
-      discoveryTimerRef.current = null;
+  const closeGuestPrompt = useCallback(() => {
+    setIsGuestPromptOpen(false);
+    try {
+      sessionStorage.setItem('aficio_guest_prompt_dismissed', 'true');
+    } catch {
+      // ignore
     }
-    setDiscoveryNotice(null);
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setIsGuestPromptOpen(false);
+    }
+  }, [isAuthenticated]);
   const [duration, setDuration] = useState<number>(0);
   const [volume, setVolumeState] = useState<number>(80);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -243,37 +246,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         // Fetch streaming video source
         const playback = await api.catalog.getTrackPlayback(track.id);
+
         if (!playback.youtubeVideoId) {
-          if (playback.source === 'api_key_missing') {
-            setError('YouTube API key is missing. Add YOUTUBE_API_KEY in .env and restart catalog-service.');
-          } else if (playback.source === 'limit_reached') {
-            if ((playback.dailyDiscoveriesLimit ?? 4) > 4) {
-              setError(`Daily personal API key quota reached (${playback.dailyDiscoveriesLimit ?? 99}/${playback.dailyDiscoveriesLimit ?? 99} album discoveries used today). Your 10,000 Google Cloud quota resets at midnight Pacific Time. Replaying all catalogued and cached releases is always free!`);
-            } else {
-              setError('Daily album discovery limit reached (4/4 options used today). You can still replay all catalogued and cached releases freely, or enter your personal YouTube API key in Settings for 99 daily discoveries!');
-            }
-          } else {
-            setError(`No playback stream available for "${track.title}"`);
-          }
+          setError(`Playback stream unavailable for "${track.title}" (not in local catalog).`);
           setIsLoading(false);
           setIsPlaying(false);
           return;
-        }
-
-        if (playback.newlyDiscovered) {
-          if (discoveryTimerRef.current) {
-            clearTimeout(discoveryTimerRef.current);
-          }
-          setDiscoveryNotice({
-            albumTitle: playback.albumTitle || 'Album',
-            used: playback.dailyDiscoveriesUsed ?? 1,
-            limit: playback.dailyDiscoveriesLimit ?? 4,
-            remaining: playback.remainingDiscoveries ?? 3,
-          });
-          discoveryTimerRef.current = setTimeout(() => {
-            setDiscoveryNotice(null);
-            discoveryTimerRef.current = null;
-          }, 10000);
         }
 
         if (playback.lengthMilliseconds) {
@@ -311,6 +289,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrentPlayback(playback);
         setIsLoading(false);
         setIsPlaying(true);
+
+        // Check if guest listener has played a couple tracks to surface community feature highlights
+        if (!isAuthenticated) {
+          try {
+            const dismissed = sessionStorage.getItem('aficio_guest_prompt_dismissed') === 'true';
+            if (!dismissed) {
+              const count = parseInt(sessionStorage.getItem('aficio_guest_play_count') || '0', 10) + 1;
+              sessionStorage.setItem('aficio_guest_play_count', String(count));
+              if (count >= 2) {
+                setIsGuestPromptOpen(true);
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
       } catch (err: any) {
         console.error('Failed to load track playback:', err);
         setError(err?.message || 'Could not load track');
@@ -318,7 +312,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsPlaying(false);
       }
     },
-    [sendIframeCommand]
+    [sendIframeCommand, isAuthenticated]
   );
 
   const togglePlay = useCallback(() => {
@@ -567,8 +561,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currentAlbum,
         currentIndex,
         error,
-        discoveryNotice,
-        dismissDiscoveryNotice,
         iframeRef,
         playTrack,
         togglePlay,
@@ -582,6 +574,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         closePlayer,
         toggleExpanded,
         setIsPlaying,
+        isGuestPromptOpen,
+        closeGuestPrompt,
       }}
     >
       {children}

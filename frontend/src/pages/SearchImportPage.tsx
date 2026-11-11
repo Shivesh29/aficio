@@ -1,16 +1,33 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type MusicBrainzReleaseResult, type MusicBrainzArtist, type MusicBrainzRecording } from '../api/client';
-import { Search, Disc, Check, ArrowRight, Loader2, Globe, User, Mic, Plus } from 'lucide-react';
+import { Search, Disc, Check, ArrowRight, Loader2, Globe, User, Mic, Plus, Users, Lock } from 'lucide-react';
 
-type SearchType = 'album' | 'artist' | 'track';
-type SearchResults = MusicBrainzReleaseResult[] | MusicBrainzArtist[] | MusicBrainzRecording[];
+type SearchType = 'album' | 'artist' | 'track' | 'user';
+type SearchResults = MusicBrainzReleaseResult[] | MusicBrainzArtist[] | MusicBrainzRecording[] | any[];
+
+const getAvatarGradient = (name: string) => {
+  const gradients = [
+    'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
+    'linear-gradient(135deg, #ec4899 0%, #be185d 100%)',
+    'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+    'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+    'linear-gradient(135deg, #10b981 0%, #047857 100%)',
+    'linear-gradient(135deg, #f97316 0%, #c2410c 100%)',
+    'linear-gradient(135deg, #06b6d4 0%, #0e7490 100%)',
+  ];
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length];
+};
 
 export const SearchImportPage = () => {
   const navigate = useNavigate();
 
   const [query, setQuery] = useState('');
-  const [searchType, setSearchType] = useState<SearchType>('artist');
+  const [searchType, setSearchType] = useState<SearchType>('album');
   const [results, setResults] = useState<SearchResults>([]);
   const [searching, setSearching] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
@@ -25,24 +42,32 @@ export const SearchImportPage = () => {
     setError('');
     setResults([]);
     try {
-      const response = await api.catalog.searchMusicBrainz(query.trim(), searchType);
-      if (searchType === 'album') {
-        const raw = (response as { releases?: MusicBrainzReleaseResult[] }).releases || [];
-        const valid = raw.filter((r) => r.title && (r['track-count'] === undefined || r['track-count'] > 0));
-        setResults(valid);
-      } else if (searchType === 'artist') {
-        setResults((response as { artists?: MusicBrainzArtist[] }).artists || []);
+      if (searchType === 'user') {
+        const users = await api.auth.searchUsers(query.trim());
+        setResults(users);
+        if (users.length === 0) {
+          setError(`No listeners found matching "${query.trim()}". Tip: Private accounts cannot be found by username. Ask your friend for their unique Listener Code (e.g. AF-XXXX-XXXX) or direct profile link.`);
+        }
       } else {
-        setResults((response as { recordings?: MusicBrainzRecording[] }).recordings || []);
-      }
-      
-      const count = searchType === 'album'
-        ? ((response as { releases?: MusicBrainzReleaseResult[] }).releases || []).filter((r) => r.title && (r['track-count'] === undefined || r['track-count'] > 0)).length
-        : searchType === 'artist'
-        ? (response as { artists?: MusicBrainzArtist[] }).artists?.length || 0
-        : (response as { recordings?: MusicBrainzRecording[] }).recordings?.length || 0;
-      if (count === 0) {
-        setError(`No ${searchType}s found matching your search. Try another title.`);
+        const response = await api.catalog.searchMusicBrainz(query.trim(), searchType);
+        if (searchType === 'album') {
+          const raw = (response as { releases?: MusicBrainzReleaseResult[] }).releases || [];
+          const valid = raw.filter((r) => r.title && (r['track-count'] === undefined || r['track-count'] > 0));
+          setResults(valid);
+        } else if (searchType === 'artist') {
+          setResults((response as { artists?: MusicBrainzArtist[] }).artists || []);
+        } else {
+          setResults((response as { recordings?: MusicBrainzRecording[] }).recordings || []);
+        }
+
+        const count = searchType === 'album'
+          ? ((response as { releases?: MusicBrainzReleaseResult[] }).releases || []).filter((r) => r.title && (r['track-count'] === undefined || r['track-count'] > 0)).length
+          : searchType === 'artist'
+          ? (response as { artists?: MusicBrainzArtist[] }).artists?.length || 0
+          : (response as { recordings?: MusicBrainzRecording[] }).recordings?.length || 0;
+        if (count === 0) {
+          setError(`No ${searchType}s found matching your search. Try another title.`);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to search for ${searchType}s`);
@@ -93,7 +118,65 @@ export const SearchImportPage = () => {
   };
 
   const renderResultCard = (result: any) => {
-    if (searchType === 'album') {
+    if (searchType === 'user') {
+      const u = result as { id: number; username: string; displayName?: string; bio?: string; avatarUrl?: string; isPrivate?: boolean; listenerCode?: string };
+      const initial = (u.username || '?').charAt(0).toUpperCase();
+      const profileKey = u.isPrivate && u.listenerCode ? u.listenerCode : u.username;
+
+      return (
+        <div
+          key={u.id}
+          className="release-result-card cursor-pointer"
+          onClick={() => navigate(`/u/${profileKey}`)}
+        >
+          <div className="release-icon-frame" style={{ display: 'grid', placeItems: 'center' }}>
+            <div
+              className="social-user-avatar-disc"
+              style={{
+                width: '40px',
+                height: '40px',
+                background: getAvatarGradient(u.username || ''),
+              }}
+            >
+              <span>{initial}</span>
+            </div>
+          </div>
+          <div className="release-info">
+            <span className="release-artist" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+              {u.isPrivate ? (
+                <>
+                  <Lock size={12} style={{ color: 'var(--accent-gold)' }} />
+                  <span style={{ color: 'var(--accent-gold)', fontWeight: 600 }}>Private Account</span>
+                </>
+              ) : (
+                'Public Listener'
+              )}
+            </span>
+            <h4 className="release-title">
+              @{u.username}
+              {u.displayName && <span style={{ marginLeft: '0.5rem', fontSize: '0.88rem', color: 'var(--text-muted)', fontWeight: 400 }}>({u.displayName})</span>}
+            </h4>
+            {u.bio && (
+              <div className="release-meta-tags">
+                <span className="meta-tag">{u.bio}</span>
+              </div>
+            )}
+          </div>
+          <div className="release-action" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="btn-primary-sm"
+              onClick={() => navigate(`/u/${profileKey}`)}
+              title={`View profile of @${u.username}`}
+            >
+              {u.isPrivate ? <Lock size={13} /> : <User size={14} />}
+              <span>{u.isPrivate ? 'View & Follow' : 'View Profile'}</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+      );
+    } else if (searchType === 'album') {
       const release = result as MusicBrainzReleaseResult;
       const artistName = release['artist-credit']?.[0]?.name || 'Unknown Artist';
       const isSynced = syncedMap[release.id];
@@ -220,19 +303,69 @@ export const SearchImportPage = () => {
     }
   };
 
+  const getPlaceholder = () => {
+    switch (searchType) {
+      case 'album':
+        return 'Search albums (e.g. In Rainbows, Abbey Road, Dark Side of the Moon)...';
+      case 'artist':
+        return 'Search artists (e.g. Radiohead, Beatles, David Bowie, Pink Floyd)...';
+      case 'track':
+        return 'Search tracks (e.g. Paranoid Android, Come Together, Time)...';
+      case 'user':
+        return 'Search public listeners by name, or paste a private Listener Code (e.g. AF-XXXX-XXXX)...';
+      default:
+        return 'Search releases or artists...';
+    }
+  };
+
   return (
     <div className="search-import-page">
       <section className="search-hero-section">
-        <h1>Search</h1>
+        <h1>Discover Music & Community</h1>
         <p>
-          Search for albums, artists, or tracks to add to your library.
+          Search across albums, artists, tracks, and public music listeners.
         </p>
+
+        <div className="search-pills-bar">
+          <button
+            type="button"
+            className={`search-pill-btn ${searchType === 'album' ? 'active' : ''}`}
+            onClick={() => setSearchType('album')}
+          >
+            <Disc size={14} />
+            <span>Albums</span>
+          </button>
+          <button
+            type="button"
+            className={`search-pill-btn ${searchType === 'artist' ? 'active' : ''}`}
+            onClick={() => setSearchType('artist')}
+          >
+            <User size={14} />
+            <span>Artists</span>
+          </button>
+          <button
+            type="button"
+            className={`search-pill-btn ${searchType === 'track' ? 'active' : ''}`}
+            onClick={() => setSearchType('track')}
+          >
+            <Mic size={14} />
+            <span>Tracks</span>
+          </button>
+          <button
+            type="button"
+            className={`search-pill-btn ${searchType === 'user' ? 'active' : ''}`}
+            onClick={() => setSearchType('user')}
+          >
+            <Users size={14} />
+            <span>Listeners</span>
+          </button>
+        </div>
 
         <form onSubmit={handleSearch} className="search-form-full">
           <Search size={18} className="search-input-icon" />
           <input
             type="text"
-            placeholder={`Search ${searchType}s (e.g. In Rainbows, Radiohead)...`}
+            placeholder={getPlaceholder()}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -242,15 +375,37 @@ export const SearchImportPage = () => {
             onChange={(e) => setSearchType(e.target.value as SearchType)}
             className="search-type-select"
           >
-            <option value="artist">Artist</option>
-            <option value="album">Album</option>
-            <option value="track">Track</option>
+            <option value="album">Albums</option>
+            <option value="artist">Artists</option>
+            <option value="track">Tracks</option>
+            <option value="user">Listeners</option>
           </select>
           <button type="submit" className="btn-primary" disabled={searching}>
             {searching ? <Loader2 size={16} className="spin-loader" /> : <Search size={16} />}
             <span>{searching ? 'Searching...' : 'Search'}</span>
           </button>
         </form>
+
+        {searchType === 'user' && (
+          <div className="search-privacy-hint-banner" style={{
+            marginTop: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.6rem 0.9rem',
+            background: 'rgba(217, 119, 6, 0.08)',
+            border: '1px solid rgba(217, 119, 6, 0.25)',
+            borderRadius: '8px',
+            fontSize: '0.85rem',
+            color: 'var(--text-secondary, #d1d5db)',
+            lineHeight: 1.4,
+          }}>
+            <Lock size={14} style={{ color: 'var(--accent-gold, #f59e0b)', flexShrink: 0 }} />
+            <span>
+              <strong style={{ color: '#fff' }}>Private accounts are unlisted.</strong> To find a private friend, search with their unique <code style={{ background: 'rgba(0,0,0,0.4)', padding: '0.15rem 0.4rem', borderRadius: '4px', color: 'var(--accent-gold, #f59e0b)', fontFamily: 'monospace' }}>Listener Code</code> or open their direct profile link.
+            </span>
+          </div>
+        )}
       </section>
 
       <section className="search-results-section">

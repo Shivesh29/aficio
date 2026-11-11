@@ -395,28 +395,48 @@ export const ProfilePage = () => {
                 <span>Private</span>
               </span>
             )}
-            {isSelf && (currentUser?.listenerCode || profile.listenerCode) && (
-              <button
-                type="button"
-                className="profile-listener-quick-pill"
-                onClick={handleShareProfile}
-                title="Click to copy your unique private profile link"
-              >
-                <Key size={12} style={{ color: 'var(--accent-gold)' }} />
-                <span>{profile.listenerCode || currentUser?.listenerCode}</span>
-                {copiedLink ? (
-                  <span style={{ color: '#10b981', fontWeight: 600 }}>Link Copied!</span>
-                ) : (
-                  <Copy size={11} style={{ opacity: 0.7 }} />
-                )}
-              </button>
-            )}
           </div>
 
           {profile.bio && (
             <p className="profile-bio">
               {profile.bio}
             </p>
+          )}
+
+          {isSelf && (currentUser?.listenerCode || profile.listenerCode) && (
+            <div className="profile-listener-strip">
+              <div className="listener-strip-left">
+                <span className="listener-strip-code">
+                  <Key size={13} style={{ color: 'var(--accent-gold)' }} />
+                  <code>{currentUser?.listenerCode || profile.listenerCode}</code>
+                </span>
+                <span className="listener-strip-hint">
+                  {profile.isPrivate
+                    ? 'Share code or link to connect'
+                    : 'Public listener code'}
+                </span>
+              </div>
+              <div className="listener-strip-actions">
+                <button
+                  type="button"
+                  className="listener-strip-btn"
+                  onClick={() => handleCopyListenerCode(currentUser?.listenerCode || profile.listenerCode || '')}
+                  title="Copy Listener Code"
+                >
+                  {copiedCode ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+                  <span>{copiedCode ? 'Copied' : 'Copy Code'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="listener-strip-btn"
+                  onClick={handleShareProfile}
+                  title="Copy direct profile link"
+                >
+                  {copiedLink ? <Check size={12} style={{ color: '#10b981' }} /> : <Share2 size={12} />}
+                  <span>{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
+                </button>
+              </div>
+            </div>
           )}
 
           <div className="profile-stats-row">
@@ -461,48 +481,6 @@ export const ProfilePage = () => {
               <span>Following</span>
             </div>
           </div>
-
-          {isSelf && (currentUser?.listenerCode || profile.listenerCode) && (
-            <div className="profile-listener-code-card">
-              <div className="listener-code-header-flex">
-                <div className="listener-code-tag-group">
-                  <Key size={14} style={{ color: 'var(--accent-gold)' }} />
-                  <strong>Your Unique Listener Code</strong>
-                  <span className={`listener-code-badge ${profile.isPrivate ? 'is-private' : 'is-public'}`}>
-                    {profile.isPrivate ? 'Private Account' : 'Public Account'}
-                  </span>
-                </div>
-                <div className="listener-code-btns">
-                  <button
-                    type="button"
-                    className="listener-code-copy-btn"
-                    onClick={() => handleCopyListenerCode(currentUser?.listenerCode || profile.listenerCode || '')}
-                    title="Copy unique Listener Code"
-                  >
-                    {copiedCode ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
-                    <span>{copiedCode ? 'Code Copied' : 'Copy Code'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="listener-code-copy-btn"
-                    onClick={handleShareProfile}
-                    title="Copy direct profile link"
-                  >
-                    {copiedLink ? <Check size={13} style={{ color: '#10b981' }} /> : <Share2 size={13} />}
-                    <span>{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
-                  </button>
-                </div>
-              </div>
-              <div className="listener-code-badge-number">
-                <code>{currentUser?.listenerCode || profile.listenerCode}</code>
-              </div>
-              <p className="listener-code-description">
-                {profile.isPrivate
-                  ? '🔒 Your account is private and completely unlisted from public username searches. Friends can locate and follow your account only by searching this random Listener Code or opening your direct profile link.'
-                  : '🌐 Your account is public. Other listeners can discover your profile by username or by entering this Listener Code.'}
-              </p>
-            </div>
-          )}
         </div>
 
         <div className="profile-hero-actions">

@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: aficio_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aficio_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: auth_db
     expose:
       - "5432"
@@ -51,10 +51,10 @@ services:
       SPRING_APPLICATION_NAME: auth-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
       SPRING_DATASOURCE_USERNAME: aficio_user
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-aficio_password}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_DATA_REDIS_HOST: redis
-      AFICIO_JWT_SECRET: ${JWT_SECRET:-change-me-in-production-to-a-long-random-string}
+      AFICIO_JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       AFICIO_REDIS_ENABLED: 'true'
       AFICIO_FRONTEND_URL: ${AFICIO_FRONTEND_URL:-http://localhost:5174}
       AFICIO_CORS_ALLOWED_ORIGINS: ${AFICIO_CORS_ALLOWED_ORIGINS:-http://localhost:*,http://localhost,http://localhost:5174,http://localhost:5173,http://localhost:3000}
@@ -85,12 +85,12 @@ services:
       SPRING_APPLICATION_NAME: catalog-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/catalog_db
       SPRING_DATASOURCE_USERNAME: aficio_user
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-aficio_password}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_DATA_REDIS_HOST: redis
       AFICIO_REDIS_ENABLED: 'true'
       AFICIO_CORS_ALLOWED_ORIGINS: ${AFICIO_CORS_ALLOWED_ORIGINS:-http://localhost:*,http://localhost,http://localhost:5174,http://localhost:5173,http://localhost:3000}
-      AFICIO_JWT_SECRET: ${JWT_SECRET:-change-me-in-production-to-a-long-random-string}
+      AFICIO_JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       AFICIO_OWNER_EMAILS: ${AFICIO_OWNER_EMAILS:-}
       JAVA_TOOL_OPTIONS: "-Xmx384m -Xms128m -Dnetworkaddress.cache.ttl=3 -Dnetworkaddress.cache.negative.ttl=1"
     depends_on:
@@ -116,12 +116,12 @@ services:
       SPRING_APPLICATION_NAME: social-service
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/social_db
       SPRING_DATASOURCE_USERNAME: aficio_user
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-aficio_password}
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       SPRING_DATA_REDIS_HOST: redis
       AFICIO_REDIS_ENABLED: 'true'
       AFICIO_CORS_ALLOWED_ORIGINS: ${AFICIO_CORS_ALLOWED_ORIGINS:-http://localhost:*,http://localhost,http://localhost:5174,http://localhost:5173,http://localhost:3000}
-      AFICIO_JWT_SECRET: ${JWT_SECRET:-change-me-in-production-to-a-long-random-string}
+      AFICIO_JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       AFICIO_AUTH_SERVICE_URL: http://auth-service:8081
       AFICIO_CATALOG_SERVICE_URL: http://catalog-service:8082
       AFICIO_FRONTEND_URL: ${AFICIO_FRONTEND_URL:-http://localhost:5174}

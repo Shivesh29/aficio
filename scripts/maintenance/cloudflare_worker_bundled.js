@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Cloudflare Worker: Aficio Smart Reverse Proxy & Offline Schedule Fallback
  * 
  * Behavior:
@@ -431,17 +431,17 @@ const OFFLINE_HTML = `<!DOCTYPE html>
       <div class="timetable-grid">
         <div class="timetable-item">
           <div class="timetable-item-status status-active-label">
-            â— Active Daily (14 hrs)
+            &bull; Active Daily (14 hrs)
           </div>
-          <div class="timetable-time">9:00 AM â€“ 11:00 PM</div>
+          <div class="timetable-time">9:00 AM - 11:00 PM</div>
           <div class="timetable-sub">Indian Standard Time (IST)</div>
         </div>
 
         <div class="timetable-item">
           <div class="timetable-item-status status-sleep-label">
-            â— Nightly Sleep (10 hrs)
+            &bull; Nightly Sleep (10 hrs)
           </div>
-          <div class="timetable-time">11:00 PM â€“ 9:00 AM</div>
+          <div class="timetable-time">11:00 PM - 9:00 AM</div>
           <div class="timetable-sub">Indian Standard Time (IST)</div>
         </div>
       </div>
@@ -529,30 +529,12 @@ const OFFLINE_HTML = `<!DOCTYPE html>
 
 export default {
   async fetch(request, env, ctx) {
-    const originUrl = new URL(request.url);
-    // Point origin to Azure VM public IP or internal hostname
-    originUrl.hostname = '20.219.11.69';
-
-    const originRequest = new Request(originUrl.toString(), {
-      method: request.method,
-      headers: request.headers,
-      body: request.body,
-      redirect: 'manual',
-    });
-
     try {
-      // Set a 4-second timeout so offline visitors don't wait on a dead TCP socket
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      // Forward request to origin (resolved via Cloudflare DNS to 20.219.11.69)
+      const response = await fetch(request);
 
-      const response = await fetch(originRequest, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      // Cloudflare error statuses indicating origin VM is stopped/unreachable
-      if (response.status === 521 || response.status === 522 || response.status === 523) {
+      // Cloudflare 521 (Web Server Down), 522 (Connection Timed Out), 523 (Origin Unreachable)
+      if (response.status === 521 || response.status === 522 || response.status === 523 || response.status === 502 || response.status === 504) {
         return new Response(OFFLINE_HTML, {
           status: 200,
           headers: {
@@ -564,7 +546,7 @@ export default {
 
       return response;
     } catch (err) {
-      // Origin VM is deallocated / TCP connection refused
+      // Origin unreachable or timeout
       return new Response(OFFLINE_HTML, {
         status: 200,
         headers: {

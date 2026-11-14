@@ -38,7 +38,7 @@ flowchart TD
     
     subgraph MicroservicesTier ["Microservices Tier"]
         Gateway -->|/users/**, /auth/**| AuthSvc["Auth Service (:8081)<br/>• BCrypt Password Hashing with Salts<br/>• 2FA TOTP (RFC 6238)<br/>• Cryptographic Listener Codes (AF-XXXX-XXXX)<br/>• Email Verification via Resend"]
-        Gateway -->|/catalog/**| CatalogSvc["Catalog Service (:8082)<br/>• 12.6M Pre-Indexed Catalog Search<br/>• 3-Tier Offline-First Resolution Engine<br/>• History Recording & Cache-Aside Layer"]
+        Gateway -->|/catalog/**| CatalogSvc["Catalog Service (:8082)<br/>• 12.6M Pre-Indexed Catalog Search<br/>• Redis Cache with Indexed DB Fallback<br/>• History Recording & Cache-Aside Layer"]
         Gateway -->|/api/reviews/**, /api/messages/**| SocialSvc["Social Service (:8083)<br/>• 5-Star Reviews & Nested Comments<br/>• Curated Public/Private Playlists<br/>• STOMP WebSocket 1-on-1 Direct Messages<br/>• Real-Time Activity Feed & Follow Requests"]
     end
 
@@ -59,12 +59,12 @@ flowchart TD
 
 ## ✨ Key Features
 
-* **Zero-Quota Offline-First Audio Streaming:**
+* **Zero-Runtime-API Audio Streaming:**
   * Powered by a pre-indexed **12.6-million-track database** (LAION-DISCO dataset).
-  * 3-tier local resolution engine: **Redis Cache hit ($<3\text{ms}$)** $\rightarrow$ **12.6M Catalog Query ($<8\text{ms}$)** $\rightarrow$ **Cross-Album Studio Fallback**. Zero external third-party API dependencies or quota limits.
+  * Fast resolution pipeline: **Redis Cache hit ($<3\text{ms}$)** $\rightarrow$ **Indexed PostgreSQL Query ($<8\text{ms}$)** $\rightarrow$ **Studio Fallback**. Resolves audio playback without runtime search API calls.
 * **Music Graph & Catalog Exploration:** Integrated discographies, release groups, and high-resolution album art with phonetic transliteration matching.
 * **Privacy by Default & Listener Codes (`AF-XXXX-XXXX`):**
-  * Accounts are private by default and completely unlisted from public search to prevent enumeration scraping.
+  * Accounts are private by default and completely unlisted from public search to eliminate sequential user identifier enumeration.
   * Users connect and share profiles exclusively via cryptographic, random 10-character Listener Codes.
 * **Two-Factor Authentication (2FA / TOTP):** Optional RFC 6238 time-based authenticator app integration with QR code provisioning.
 * **Ratings & Rich Reviews:** 5-star scoring system with markdown critiques, community likes, and nested discussions.
@@ -91,8 +91,8 @@ flowchart TD
 
 ## 💡 Engineering Deep Dives
 
-### 1. Zero-Quota 12.6M Track Resolution Engine
-Rather than relying on brittle third-party streaming APIs that enforce strict rate limits and break at scale, Aficio indexes **12,684,862 pre-crawled tracks** directly in PostgreSQL. Using B-Tree indexed foreign-key lookups combined with a Redis Cache-Aside layer, playback resolution takes **under 3 milliseconds** on cache hits and under 8 milliseconds on cold catalog queries.
+### 1. Ingestion Pipeline & Sub-3ms Resolution Engine
+Rather than relying on brittle third-party streaming APIs that enforce strict rate limits and break at scale, Aficio ingests and indexes **12,684,862 pre-crawled tracks** directly in PostgreSQL. Using B-Tree indexed lookups combined with a Redis Cache-Aside layer, track-to-video resolution takes **under 3 milliseconds** on cache hits and under 8 milliseconds on cold database lookups without runtime search API calls.
 
 ### 2. Edge Fallback via Cloudflare Serverless Workers
 To sustainably manage cloud resources on a student grant without sacrificing portfolio reliability, the Azure VM operates on a scheduled 14-hour daily window (9:00 AM to 11:00 PM IST). A Cloudflare Worker sits in front of the origin IP:
@@ -166,7 +166,7 @@ aficio/
 ├── services/
 │   ├── api-gateway/            # Spring Cloud Gateway & JWT validation (Port 8080)
 │   ├── auth-service/           # User auth, BCrypt, 2FA TOTP, Listener Codes, Resend (Port 8081)
-│   ├── catalog-service/        # 12.6M catalog index, 3-tier playback resolution (Port 8082)
+│   ├── catalog-service/        # 12.6M catalog index, Redis/Postgres playback resolution (Port 8082)
 │   └── social-service/         # Reviews, lists, DMs, STOMP WebSockets, Kafka consumers (Port 8083)
 ├── shared/
 │   ├── dto-lib/                # Shared Java records and DTO contracts

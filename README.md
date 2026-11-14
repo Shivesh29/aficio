@@ -110,46 +110,43 @@ Social actions (such as album views, follower notifications, and review likes) a
 
 ---
 
-## 🚀 Running Locally
+## 🛠️ Local Development & Orchestration
 
-### Prerequisites
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Docker Engine 24+ & Docker Compose v2+)
-* [Node.js](https://nodejs.org/) v20+ *(Optional, for standalone frontend development)*
-* [Java 21 JDK](https://adoptium.net/) & Maven *(Optional, for standalone service debugging)*
+The local Docker Compose configuration boots the complete microservice mesh, Kafka event broker, Redis cache, and multi-schema PostgreSQL persistence tier in isolated bridge networking.
 
-### Quickstart
+> [!NOTE]
+> **Production vs. Local Catalog:** The complete **12.6M-track indexed catalog** and audio streaming engine are hosted on the live [Production Deployment](https://aficio.shivesh29.me). Fresh local environments boot with migrated schemas and can be optionally hydrated with synthetic community test data.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Shivesh29/aficio.git
-   cd aficio
-   ```
+### Spin-up
 
-2. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   ```
-   *(The default `.env.example` comes with pre-filled local secrets and configurations for instant local running).*
-
-3. **Start the application with Docker Compose:**
-   ```bash
-   docker compose up -d --build
-   ```
-
-4. **Access the application:**
-   * **Frontend Web App:** [http://localhost:5174](http://localhost:5174)
-   * **API Gateway:** [http://localhost:8080](http://localhost:8080)
-   * **PostgreSQL:** `localhost:5432` (`auth_db`, `catalog_db`, `social_db`)
-   * **Redis:** `localhost:6379`
-
-To view container logs:
 ```bash
-docker compose logs -f
+# 1. Initialize environment variables with local defaults
+cp .env.example .env
+
+# 2. Build and boot all microservices, Kafka, Redis & PostgreSQL
+docker compose up -d --build
+
+# 3. (Optional) Hydrate with 15 synthetic music personas, reviews & listening history
+./scripts/seed/apply_seed.sh
 ```
 
-To stop all containers:
+### Local Service Endpoints
+
+| Service | Address | Description |
+|:---|:---|:---|
+| **Frontend Client** | [http://localhost:5174](http://localhost:5174) | React 19 SPA (Vite) |
+| **Spring Cloud Gateway** | [http://localhost:8080](http://localhost:8080) | Single entry point & JWT filter |
+| **Auth Service** | `http://localhost:8081` | BCrypt, TOTP 2FA, Listener Codes |
+| **Catalog Service** | `http://localhost:8082` | Resolution engine & track index |
+| **Social Service** | `http://localhost:8083` | Reviews, lists & STOMP WebSockets |
+| **PostgreSQL 16** | `localhost:5432` | Multi-DB (`auth_db`, `catalog_db`, `social_db`) |
+| **Redis 7** | `localhost:6379` | In-memory cache & Pub/Sub |
+| **Apache Kafka** | `localhost:9092` | Event broker (`album-views`, `social-events`) |
+
+To monitor logs or tear down the stack:
 ```bash
-docker compose down
+docker compose logs -f      # Follow unified cluster logs
+docker compose down         # Gracefully terminate all containers
 ```
 
 ---

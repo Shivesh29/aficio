@@ -22,33 +22,33 @@ Live Production URL: <a href="https://aficio.shivesh29.me" target="_blank" rel="
 
 ```mermaid
 flowchart TD
-    User["🌐 User Browser / Mobile Client"] -->|HTTPS / 443| CF["Cloudflare Edge Proxy<br/>• DDoS & Bot Protection<br/>• Smart Offline Fallback (<20ms)"]
+    User["🌐 User Browser / Mobile Client"] -->|HTTPS / 443| CF["Cloudflare Edge Proxy<br/>• DDoS & Bot Protection<br/>• Smart Offline Fallback (&lt;20ms)"]
     
-    subgraph Edge & Security Tier
+    subgraph EdgeTier ["Edge & Security Tier"]
         CF -->|Proxy Traffic| Nginx["Nginx Reverse Proxy (:443)<br/>• SSL Termination (Let's Encrypt)<br/>• Burst Rate Limiting (limit_req)<br/>• Security Headers & Static Bundles"]
     end
     
-    subgraph Frontend Tier
+    subgraph FrontendTier ["Frontend Tier"]
         Nginx -->|Serves Static SPA| ReactApp["React 19 + TypeScript (Vite)<br/>• Custom Dark/Gold Design System<br/>• Global Audio Stream State Machine<br/>• iPhone Safe-Area Responsive Dock"]
     end
     
-    subgraph API Gateway
+    subgraph GatewayTier ["API Gateway"]
         Nginx -->|Proxy REST & WebSockets| Gateway["Spring Cloud Gateway (:8080)<br/>• Central Routing & CORS Whitelist<br/>• Stateless JWT Authentication Filter<br/>• WebSocket (STOMP) Reverse Proxy"]
     end
     
-    subgraph Microservices Tier
+    subgraph MicroservicesTier ["Microservices Tier"]
         Gateway -->|/users/**, /auth/**| AuthSvc["Auth Service (:8081)<br/>• BCrypt Password Hashing with Salts<br/>• 2FA TOTP (RFC 6238)<br/>• Cryptographic Listener Codes (AF-XXXX-XXXX)<br/>• Email Verification via Resend"]
         Gateway -->|/catalog/**| CatalogSvc["Catalog Service (:8082)<br/>• 12.6M Pre-Indexed Catalog Search<br/>• 3-Tier Offline-First Resolution Engine<br/>• History Recording & Cache-Aside Layer"]
         Gateway -->|/api/reviews/**, /api/messages/**| SocialSvc["Social Service (:8083)<br/>• 5-Star Reviews & Nested Comments<br/>• Curated Public/Private Playlists<br/>• STOMP WebSocket 1-on-1 Direct Messages<br/>• Real-Time Activity Feed & Follow Requests"]
     end
 
-    subgraph Caching & Event Streaming
-        CatalogSvc <-->|Sub-3ms Cache Hits| RedisCache[("Redis 7 In-Memory Cache<br/>• Playback Cache-Aside Layer<br/>• Real-Time Unread Badges")]
+    subgraph CachingTier ["Caching & Event Streaming"]
+        CatalogSvc ---|Sub-3ms Cache Hits| RedisCache[("Redis 7 In-Memory Cache<br/>• Playback Cache-Aside Layer<br/>• Real-Time Unread Badges")]
         CatalogSvc -->|Publish Album View Event| KafkaBus{{"Apache Kafka Event Bus<br/>• Topic: album-views<br/>• Topic: social-events"}}
         KafkaBus -->|Async Non-Blocking Consumer| SocialSvc
     end
 
-    subgraph Persistence Tier (PostgreSQL)
+    subgraph PersistenceTier ["Persistence Tier (PostgreSQL)"]
         AuthSvc --> AuthDB[("auth_db<br/>• Users & Credentials")]
         CatalogSvc --> CatalogDB[("catalog_db<br/>• 12.6M youtube_catalog Index<br/>• track_playback_cache")]
         SocialSvc --> SocialDB[("social_db<br/>• Reviews, Follows, Collections<br/>(13 Flyway Migrations)")]
